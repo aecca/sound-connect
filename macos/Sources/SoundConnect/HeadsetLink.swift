@@ -15,6 +15,8 @@ final class HeadsetLink: NSObject, IOBluetoothRFCOMMChannelDelegate {
     private var channel: IOBluetoothRFCOMMChannel?
     private var channelOpen = false
     private var failures = 0
+    /// The user asked to connect a headset and Bluetooth is still working on it.
+    private var connectingManually = false
     private var retry: Timer?
     private var timers: [Timer] = []
     private var connectNotification: IOBluetoothUserNotification?
@@ -33,7 +35,7 @@ final class HeadsetLink: NSObject, IOBluetoothRFCOMMChannelDelegate {
 
     private func attempt() {
         retry = nil
-        guard channel == nil else { return }
+        guard channel == nil, !connectingManually else { return }
 
         let devices = (IOBluetoothDevice.pairedDevices() as? [IOBluetoothDevice]) ?? []
         model.disconnectedHeadsets = devices.filter { !$0.isConnected() && Self.looksLikeSony($0) }.map(\.nameOrAddress)
@@ -80,10 +82,33 @@ final class HeadsetLink: NSObject, IOBluetoothRFCOMMChannelDelegate {
         if channel == nil { scheduleAttempt(after: 0.2) }
     }
 
-    /// Connects a paired headset, like the Connect button for AirPods.
+    /// Connects a paired headset, like the Connect button for AirPods. With
+    /// a target, `openConnection` returns right away and reports back in
+    /// `connectionComplete`; without one it blocks until Bluetooth gives up.
     private func connect(name: String) {
         let devices = (IOBluetoothDevice.pairedDevices() as? [IOBluetoothDevice]) ?? []
-        devices.first { $0.nameOrAddress == name }?.openConnection(nil)
+        guard let device = devices.first(where: { $0.nameOrAddress == name }) else { return }
+        retry?.invalidate()
+        retry = nil
+        connectingManually = true
+        model.notice = nil
+        model.reset(to: .connecting(name: name))
+        if device.openConnection(self) != kIOReturnSuccess { connectionFailed(name: name) }
+    }
+
+    @objc private func connectionComplete(_ device: IOBluetoothDevice, status: IOReturn) {
+        connectingManually = false
+        guard status == kIOReturnSuccess else { return connectionFailed(name: device.nameOrAddress ?? "") }
+        failures = 0
+        // Give the headset a moment to finish setting up audio.
+        scheduleAttempt(after: 1.5)
+    }
+
+    private func connectionFailed(name: String) {
+        connectingManually = false
+        model.reset(to: .searching)
+        model.notice = "Couldn't connect. Are they on?"
+        scheduleAttempt(after: Self.retryDelays[0])
     }
 
     // MARK: The control channel
@@ -101,15 +126,20 @@ final class HeadsetLink: NSObject, IOBluetoothRFCOMMChannelDelegate {
 
         failures = 0
         channelOpen = true
+        model.notice = nil
         session = Session()
+        let profile = profileFor(name: model.name ?? "")
+        model.profile = profile
         if let name = model.name { model.connection = .connected(name: name) }
-        for request in initialRequests() { write(session.request(request: request)) }
+        for request in initialRequests(profile: profile) { write(session.request(request: request)) }
         timers = [
             schedule(after: 0.25, repeats: true) { [weak self] in
                 guard let self else { return }
                 write(session.tick())
             },
-            schedule(after: 60, repeats: true) { [weak self] in self?.send(.battery) },
+            schedule(after: 60, repeats: true) { [weak self] in
+                batteryRequests(profile: profile).forEach { self?.send($0) }
+            },
         ]
     }
 

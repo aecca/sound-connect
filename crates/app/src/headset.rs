@@ -56,7 +56,7 @@ impl Headset {
                 Update::NoiseControl(noise) => self.noise = Some(noise),
                 Update::SpeakToChat(on) => self.speak_to_chat = Some(on),
                 // Not shown in this panel yet.
-                Update::Equalizer(_) | Update::Dsee(_) => {}
+                Update::EarbudBattery { .. } | Update::CaseBattery(_) | Update::Equalizer(_) | Update::Dsee(_) => {}
             },
         }
     }

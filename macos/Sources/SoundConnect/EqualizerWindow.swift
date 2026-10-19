@@ -2,7 +2,7 @@ import AppKit
 import SoundConnectCore
 import SwiftUI
 
-/// A small window to shape the manual equalizer: five bands and Clear Bass.
+/// A small window to shape the manual equalizer.
 @MainActor
 enum EqualizerWindow {
     private static var window: NSWindow?
@@ -23,8 +23,6 @@ enum EqualizerWindow {
 }
 
 private struct EqualizerView: View {
-    private static let frequencies = ["400", "1k", "2.5k", "6.3k", "16k"]
-
     let model: HeadsetModel
 
     var body: some View {
@@ -37,12 +35,11 @@ private struct EqualizerView: View {
                 }
                 .frame(width: 220)
 
-                HStack(alignment: .bottom, spacing: 14) {
-                    ForEach(0..<5, id: \.self) { index in
-                        BandSlider(label: Self.frequencies[index], value: bandBinding(equalizer, index))
-                    }
-                    Divider().frame(height: 170)
-                    BandSlider(label: "Clear Bass", value: clearBassBinding(equalizer))
+                switch equalizer.bands {
+                case .five(let clearBass, let bands):
+                    fiveBands(clearBass: clearBass, bands: bands)
+                case .ten(let bands):
+                    tenBands(Array(bands))
                 }
 
                 Text("Moving a slider switches the preset to Manual.")
@@ -55,35 +52,76 @@ private struct EqualizerView: View {
             }
         }
         .padding(20)
-        .frame(width: 440)
+        .fixedSize()
+    }
+
+    private func fiveBands(clearBass: Int8, bands: [Int8]) -> some View {
+        let frequencies = ["400", "1k", "2.5k", "6.3k", "16k"]
+        return HStack(alignment: .bottom, spacing: 14) {
+            ForEach(bands.indices, id: \.self) { index in
+                BandSlider(
+                    label: frequencies[safe: index] ?? "",
+                    range: -10...10,
+                    value: Binding(
+                        get: { Double(bands[index]) },
+                        set: { value in
+                            var bands = bands
+                            bands[index] = Int8(value.rounded())
+                            model.setBands(.five(clearBass: clearBass, bands: bands))
+                        }
+                    )
+                )
+            }
+            Divider().frame(height: 170)
+            BandSlider(
+                label: "Clear Bass",
+                range: -10...10,
+                value: Binding(
+                    get: { Double(clearBass) },
+                    set: { model.setBands(.five(clearBass: Int8($0.rounded()), bands: bands)) }
+                )
+            )
+        }
+    }
+
+    /// The WH-1000XM6's ten bands use raw device values (0 to 12) whose dB
+    /// scale isn't known yet, so they show no numbers.
+    private func tenBands(_ bands: [UInt8]) -> some View {
+        let frequencies = ["31", "63", "125", "250", "500", "1k", "2k", "4k", "8k", "16k"]
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .bottom, spacing: 8) {
+                ForEach(bands.indices, id: \.self) { index in
+                    BandSlider(
+                        label: frequencies[safe: index] ?? "",
+                        range: 0...12,
+                        showsValue: false,
+                        value: Binding(
+                            get: { Double(bands[index]) },
+                            set: { value in
+                                var bands = bands
+                                bands[index] = UInt8(value.rounded())
+                                model.setBands(.ten(bands: Data(bands)))
+                            }
+                        )
+                    )
+                }
+            }
+            Text("Ten-band support hasn't been tested on real headphones yet.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        }
     }
 
     private func presetBinding(_ equalizer: Equalizer) -> Binding<EqPreset> {
         Binding(get: { equalizer.preset }, set: { model.setPreset($0) })
     }
-
-    private func bandBinding(_ equalizer: Equalizer, _ index: Int) -> Binding<Double> {
-        Binding(
-            get: { Double(equalizer.bands[index]) },
-            set: { value in
-                var bands = equalizer.bands
-                bands[index] = Int8(value.rounded())
-                model.setBands(clearBass: equalizer.clearBass, bands: bands)
-            }
-        )
-    }
-
-    private func clearBassBinding(_ equalizer: Equalizer) -> Binding<Double> {
-        Binding(
-            get: { Double(equalizer.clearBass) },
-            set: { model.setBands(clearBass: Int8($0.rounded()), bands: equalizer.bands) }
-        )
-    }
 }
 
-/// A vertical slider from -10 to +10 with its value on top and a label below.
+/// A vertical slider with its value on top and a label below.
 private struct BandSlider: View {
     let label: String
+    let range: ClosedRange<Double>
+    var showsValue = true
     @Binding var value: Double
 
     var body: some View {
@@ -91,7 +129,8 @@ private struct BandSlider: View {
             Text(value > 0 ? "+\(Int(value))" : "\(Int(value))")
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
-            Slider(value: $value, in: -10...10, step: 1)
+                .opacity(showsValue ? 1 : 0)
+            Slider(value: $value, in: range, step: 1)
                 .rotationEffect(.degrees(-90))
                 .frame(width: 150, height: 24)
                 .frame(width: 32, height: 150)
@@ -99,6 +138,12 @@ private struct BandSlider: View {
                 .font(.caption)
                 .fixedSize()
         }
-        .frame(width: 44)
+        .frame(width: 40)
+    }
+}
+
+private extension Array {
+    subscript(safe index: Int) -> Element? {
+        indices.contains(index) ? self[index] : nil
     }
 }

@@ -21,8 +21,13 @@ If you change the mode with the button on your headphones, Sound Connect shows t
 
 ## Works with
 
-- **Headphones:** Sony WH-1000XM5. Support for more Sony models is coming.
-- **Computers:** Mac. Linux support is on the way.
+**Tested and working:** Sony WH-1000XM5.
+
+**Should work, but not tested yet:** WH-1000XM6, WF-1000XM4, WF-1000XM5, WF-1000XM6, WH-CH720N, ULT WEAR and LinkBuds S. If you have one of these, please [tell us how it goes](https://github.com/aecca/sound-connect/issues), even if everything works.
+
+**Not supported yet:** older models such as the WH-1000XM4 and WH-1000XM3.
+
+**Computers:** Mac. Linux support is on the way.
 
 ## Getting started
 

@@ -19,7 +19,13 @@ final class HeadsetModel {
     var connection = Connection.searching {
         didSet { if Self.debug, connection != oldValue { print("connection:", connection) } }
     }
+    /// What the connected model supports; set by the link when it connects.
+    var profile: Profile?
     var battery: Battery?
+    /// Earbuds report each side and the case instead of `battery`.
+    var leftBattery: Battery?
+    var rightBattery: Battery?
+    var caseBattery: Battery?
     var codec: String?
     var firmware: String?
     var noise: NoiseControl?
@@ -28,6 +34,8 @@ final class HeadsetModel {
     var dsee: Bool?
     /// Sony headsets paired with this Mac but not connected right now.
     var disconnectedHeadsets: [String] = []
+    /// A problem to show while not connected, e.g. a failed connection.
+    var notice: String?
 
     /// Set by the link: sends a request to the headset.
     @ObservationIgnored var send: (Request) -> Void = { _ in }
@@ -48,6 +56,10 @@ final class HeadsetModel {
             if !v2, let name { connection = .unsupported(name: name) }
         case .firmware(let version): firmware = version
         case .battery(let value): battery = value
+        case .earbudBattery(let left, let right):
+            leftBattery = left
+            rightBattery = right
+        case .caseBattery(let value): caseBattery = value
         case .codec(let name): codec = name
         case .noiseControl(let value): noise = value
         case .speakToChat(let on): speakToChat = on
@@ -59,7 +71,11 @@ final class HeadsetModel {
     /// Forgets the headset's state, e.g. after it disconnects.
     func reset(to connection: Connection) {
         self.connection = connection
+        profile = nil
         battery = nil
+        leftBattery = nil
+        rightBattery = nil
+        caseBattery = nil
         codec = nil
         firmware = nil
         noise = nil
@@ -92,20 +108,18 @@ final class HeadsetModel {
     }
 
     func setPreset(_ preset: EqPreset) {
-        guard var equalizer, equalizer.preset != preset else { return }
+        guard var equalizer, let layout = profile?.equalizer, equalizer.preset != preset else { return }
         equalizer.preset = preset
         self.equalizer = equalizer
-        send(.setEqualizerPreset(preset: preset))
+        send(.setEqualizerPreset(layout: layout, preset: preset))
     }
 
-    /// Changes the manual bands (400 Hz to 16 kHz) and Clear Bass, which
-    /// switches the preset to Manual.
-    func setBands(clearBass: Int8, bands: [Int8]) {
-        guard var equalizer else { return }
-        equalizer = Equalizer(preset: .manual, clearBass: clearBass, bands: bands)
-        guard equalizer != self.equalizer else { return }
+    /// Changes the manual equalizer bands, which switches the preset to Manual.
+    func setBands(_ bands: EqBands) {
+        let equalizer = Equalizer(preset: .manual, bands: bands)
+        guard self.equalizer != nil, equalizer != self.equalizer else { return }
         self.equalizer = equalizer
-        send(.setEqualizerBands(clearBass: clearBass, bands: bands))
+        send(.setEqualizerBands(bands: bands))
     }
 
     func setDsee(_ on: Bool) {

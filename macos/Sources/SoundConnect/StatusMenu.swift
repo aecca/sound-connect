@@ -11,6 +11,8 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         (.off, "Off", "person.crop.circle"),
         (.ambient, "Ambient Sound", "person.wave.2"),
         (.noiseCancelling, "Noise Cancelling", "person.crop.circle.fill"),
+        // Only on models whose profile has wind reduction (WF-1000XM4/XM5).
+        (.windReduction, "Wind Noise Reduction", "wind"),
     ]
 
     private let model: HeadsetModel
@@ -37,10 +39,6 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     init(model: HeadsetModel) {
         self.model = model
         super.init()
-        if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "headphones", accessibilityDescription: "Sound Connect")
-            button.image?.isTemplate = true
-        }
         menu.delegate = self
         menu.autoenablesItems = false
         statusItem.menu = menu
@@ -58,13 +56,26 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         case .unsupported:
             .message("These headphones aren't supported yet", connect: [])
         case .searching:
-            .message("Looking for your headphones…", connect: model.disconnectedHeadsets)
+            .message(model.notice ?? "Looking for your headphones…", connect: model.disconnectedHeadsets)
         }
     }
 
     private func refresh() {
         if layout != builtFor { build(layout) }
         update()
+        updateIcon()
+    }
+
+    /// The menu bar icon: over-ear headphones, distinct from the system's own
+    /// headphones symbol, dimmed while no headset is connected.
+    private func updateIcon() {
+        let mode = model.noise.flatMap { noise in Self.modes.first { $0.0 == noise.mode } }
+        let description = mode.map { "Sound Connect: \($0.1)" } ?? "Sound Connect: not connected"
+        let image = NSImage(systemSymbolName: "beats.headphones", accessibilityDescription: description)?
+            .withSymbolConfiguration(.init(pointSize: 15, weight: .regular))
+        image?.isTemplate = true
+        statusItem.button?.image = image
+        statusItem.button?.appearsDisabled = model.noise == nil
     }
 
     private func build(_ layout: Layout) {
@@ -79,7 +90,10 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         presetItems = []
         dseeItem = nil
 
-        menu.addItem(viewItem(NSHostingView(rootView: HeaderView(model: model))))
+        // Views inside menus need a real frame; SwiftUI sizes the header itself.
+        let header = NSHostingView(rootView: HeaderView(model: model))
+        header.frame = NSRect(origin: .zero, size: header.fittingSize)
+        menu.addItem(viewItem(header))
         menu.addItem(.separator())
 
         switch layout {
@@ -96,22 +110,25 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
         case .controls:
             menu.addItem(.sectionHeader(title: "Noise Control"))
-            for (index, (_, title, icon)) in Self.modes.enumerated() {
+            for (index, (mode, title, icon)) in Self.modes.enumerated() {
                 let item = actionItem(title, #selector(selectMode(_:)))
                 item.tag = index
                 item.image = symbol(icon)
                 menu.addItem(item)
                 modeItems.append(item)
+
+                // Ambient options sit right under Ambient Sound, shown while it's on.
+                if mode == .ambient {
+                    let slider = LevelSliderView { [weak self] level in self?.model.setAmbientLevel(level) }
+                    levelView = slider
+                    levelItem = viewItem(slider)
+                    menu.addItem(levelItem!)
+
+                    focusItem = actionItem("Focus on Voice", #selector(toggleFocusOnVoice))
+                    focusItem!.indentationLevel = 1
+                    menu.addItem(focusItem!)
+                }
             }
-
-            let slider = LevelSliderView { [weak self] level in self?.model.setAmbientLevel(level) }
-            levelView = slider
-            levelItem = viewItem(slider)
-            menu.addItem(levelItem!)
-
-            focusItem = actionItem("Focus on Voice", #selector(toggleFocusOnVoice))
-            focusItem!.indentationLevel = 1
-            menu.addItem(focusItem!)
 
             menu.addItem(.separator())
             speakToChatItem = actionItem("Speak-to-Chat", #selector(toggleSpeakToChat))
@@ -140,6 +157,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         let ambient = noise.mode == .ambient
         for (item, (mode, _, _)) in zip(modeItems, Self.modes) {
             item.state = noise.mode == mode ? .on : .off
+            if mode == .windReduction { item.isHidden = model.profile?.windReduction != true }
         }
         levelItem?.isHidden = !ambient
         levelView?.level = noise.ambientLevel
@@ -172,7 +190,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     /// Re-renders whenever anything the menu shows changes.
     private func observe() {
         withObservationTracking {
-            _ = (model.connection, model.noise, model.speakToChat, model.disconnectedHeadsets, model.equalizer, model.dsee)
+            _ = (model.connection, model.noise, model.speakToChat, model.disconnectedHeadsets, model.equalizer, model.dsee, model.notice)
         } onChange: {
             Task { @MainActor [weak self] in
                 self?.refresh()
@@ -259,12 +277,13 @@ private struct HeaderView: View {
             Spacer(minLength: 16)
 
             if let battery = model.battery {
-                Text("\(battery.level)%")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-                Image(systemName: batterySymbol(battery))
-                    .font(.system(size: 15))
-                    .foregroundStyle(battery.charging ? .green : battery.level <= 20 ? .red : .secondary)
+                BatteryLabel(title: nil, battery: battery)
+            }
+            // Earbuds: each side and the case, like the AirPods header.
+            HStack(spacing: 8) {
+                if let left = model.leftBattery { BatteryLabel(title: "L", battery: left) }
+                if let right = model.rightBattery { BatteryLabel(title: "R", battery: right) }
+                if let charging = model.caseBattery { BatteryLabel(title: "Case", battery: charging) }
             }
         }
         .padding(.horizontal, 14)
@@ -282,9 +301,29 @@ private struct HeaderView: View {
         case .connecting: return "Connecting…"
         case .unsupported: return "Not supported yet"
         case .connected:
-            return ["Connected", model.codec, model.firmware.map { "Firmware \($0)" }]
+            // Be upfront when this model's support hasn't been tried yet.
+            let untested = model.profile.map { !$0.tested } == true ? "Untested model" : nil
+            return ["Connected", model.codec, model.firmware.map { "Firmware \($0)" }, untested]
                 .compactMap { $0 }
                 .joined(separator: " · ")
+        }
+    }
+}
+
+/// A battery level with the system's battery symbol, optionally titled
+/// ("L", "R", "Case") for earbuds.
+private struct BatteryLabel: View {
+    let title: String?
+    let battery: Battery
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text([title, "\(battery.level)%"].compactMap { $0 }.joined(separator: " "))
+                .font(.system(size: title == nil ? 13 : 11))
+                .foregroundStyle(.secondary)
+            Image(systemName: batterySymbol(battery))
+                .font(.system(size: title == nil ? 15 : 12))
+                .foregroundStyle(battery.charging ? .green : battery.level <= 20 ? .red : .secondary)
         }
     }
 
@@ -303,6 +342,8 @@ private struct HeaderView: View {
 /// The "Ambient Sound Level" row: a label and a slider, like the volume
 /// slider in the Sound menu.
 private final class LevelSliderView: NSView {
+    /// Lines up with the indented "Focus on Voice" item below it.
+    private static let indent: CGFloat = 57
     private let slider = NSSlider(value: 20, minValue: 1, maxValue: 20, target: nil, action: nil)
     private let onChange: (UInt8) -> Void
 
@@ -330,9 +371,9 @@ private final class LevelSliderView: NSView {
             addSubview(view)
         }
         NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 38),
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.indent),
             label.topAnchor.constraint(equalTo: topAnchor, constant: 4),
-            slider.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 38),
+            slider.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.indent),
             slider.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
             slider.topAnchor.constraint(equalTo: label.bottomAnchor, constant: 4),
         ])

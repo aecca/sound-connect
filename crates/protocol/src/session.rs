@@ -43,8 +43,8 @@ impl Session {
         if matches!(request, Request::SetNoiseControl(_)) {
             self.queue.retain(|r| !matches!(r, Request::SetNoiseControl(_)));
         }
-        if matches!(request, Request::SetEqualizerBands { .. }) {
-            self.queue.retain(|r| !matches!(r, Request::SetEqualizerBands { .. }));
+        if matches!(request, Request::SetEqualizerBands(_)) {
+            self.queue.retain(|r| !matches!(r, Request::SetEqualizerBands(_)));
         }
         self.queue.push_back(request);
         self.pump(now)
@@ -131,7 +131,7 @@ mod tests {
         let mut s = Session::default();
         s.request(Request::Init, now);
         for level in [5, 10, 15] {
-            let nc = NoiseControl { mode: NoiseMode::Ambient, focus_on_voice: false, ambient_level: level };
+            let nc = NoiseControl { mode: NoiseMode::Ambient, ambient_level: level, ..NoiseControl::default() };
             s.request(Request::SetNoiseControl(nc), now);
         }
         let out = s.receive(&ack(1), now);
