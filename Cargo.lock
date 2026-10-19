@@ -6272,7 +6272,7 @@ dependencies = [
 
 [[package]]
 name = "sc-bluetooth"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-channel",
  "bluer",
@@ -6286,11 +6286,11 @@ dependencies = [
 
 [[package]]
 name = "sc-core"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "sc-ffi"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "sc-core",
  "uniffi",
@@ -6739,7 +6739,7 @@ dependencies = [
 
 [[package]]
 name = "sound-connect"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-channel",
  "gpui-kit",
