@@ -14,8 +14,10 @@ use crate::device::{AutoOff, Battery, BatteryLayout, Brand, Device, Feature, Lis
 use crate::driver::{Driver, Frame, Output};
 use crate::queue::StopAndWait;
 
-/// The control service Bose headsets advertise for BMAP.
+/// Apple's Wireless iAP service, which Bose headsets advertise and are recognized by; BMAP isn't on its channel.
 pub const SERVICE: &str = "00000000-DECA-FADE-DECA-DEAFDECACAFF";
+/// Serial Port, whose channel carries BMAP on the QuietComfort 35 and 35 II.
+pub const CHANNEL_SERVICE: &str = "00001101-0000-1000-8000-00805F9B34FB";
 
 /// Models this driver knows, by the product ID the headset reports.
 const MODELS: [(u16, &str); 2] = [(0x400c, "QuietComfort 35"), (0x4020, "QuietComfort 35 II")];

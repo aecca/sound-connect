@@ -2,9 +2,9 @@
 //! without doing any I/O.
 //!
 //! A transport finds a paired headset offering one of the [`SERVICES`], opens
-//! that channel, gets the headset's [`Driver`] from [`driver_for`] and moves
-//! bytes between the two. Apps work with the brand-neutral [`Device`],
-//! [`Update`] and [`Setting`].
+//! the channel of its [`channel_service`], gets the headset's [`Driver`] from
+//! [`driver_for`] and moves bytes between the two. Apps work with the
+//! brand-neutral [`Device`], [`Update`] and [`Setting`].
 
 pub mod device;
 pub mod driver;
@@ -18,4 +18,4 @@ pub use device::{
 };
 pub use driver::{Driver, Frame, Output};
 pub use equalizer::{EqBands, EqLayout, EqPreset, Equalizer};
-pub use registry::{SERVICES, driver_for};
+pub use registry::{SERVICES, channel_service, driver_for};
