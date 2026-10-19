@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/protocol", "crates/bluetooth", "crates/app", "crates/ffi"]
+members = ["crates/core", "crates/bluetooth", "crates/app", "crates/ffi"]
 
 [workspace.package]
 version = "0.1.0"
@@ -9,6 +9,6 @@ license = "MIT"
 repository = "https://github.com/aecca/sound-connect"
 
 [workspace.dependencies]
-sc-protocol = { path = "crates/protocol" }
+sc-core = { path = "crates/core" }
 sc-bluetooth = { path = "crates/bluetooth" }
 async-channel = "2"

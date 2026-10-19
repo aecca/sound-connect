@@ -5,17 +5,10 @@ import SoundConnectCore
 import SwiftUI
 
 /// The menu bar icon and its menu, laid out like the AirPods section of the
-/// macOS Bluetooth menu.
+/// macOS Bluetooth menu. Which items it has comes from the headset's
+/// `Device`, so it works for any brand.
 @MainActor
 final class StatusMenu: NSObject, NSMenuDelegate {
-    private static let modes: [(NoiseMode, String, String)] = [
-        (.off, "Off", "person.crop.circle"),
-        (.ambient, "Ambient Sound", "person.wave.2"),
-        (.noiseCancelling, "Noise Cancelling", "person.crop.circle.fill"),
-        // Only on models whose profile has wind reduction (WF-1000XM4/XM5).
-        (.windReduction, "Wind Noise Reduction", "wind"),
-    ]
-
     private let model: HeadsetModel
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     private let menu = NSMenu()
@@ -23,18 +16,17 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     /// What the menu was last built for; anything else is updated in place,
     /// so an open menu (and a slider being dragged) is never rebuilt.
     private var builtFor: Layout?
-    private var modeItems: [NSMenuItem] = []
+    private var modeItems: [(ListeningMode, NSMenuItem)] = []
     private var levelItem: NSMenuItem?
     private var levelView: LevelSliderView?
     private var focusItem: NSMenuItem?
-    private var speakToChatItem: NSMenuItem?
-    private var equalizerItem: NSMenuItem?
+    private var featureItems: [(Feature, NSMenuItem)] = []
     private var presetItems: [(EqPreset, NSMenuItem)] = []
-    private var dseeItem: NSMenuItem?
+    private var autoOffItems: [(AutoOff, NSMenuItem)] = []
     private var openAtLoginItem: NSMenuItem?
 
     private enum Layout: Equatable {
-        case controls
+        case controls(Device)
         case message(String, connect: [String])
     }
 
@@ -63,12 +55,12 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
     private var layout: Layout {
         switch model.connection {
-        case .connected where model.noise != nil:
-            .controls
-        case .connected, .connecting:
+        case .connected:
+            if let device = model.device { .controls(device) } else { .message("Connecting…", connect: []) }
+        case .connecting:
             .message("Connecting…", connect: [])
-        case .unsupported:
-            .message("These headphones aren't supported yet", connect: [])
+        case .unsupported(_, let reason):
+            .message(reason, connect: [])
         case .searching:
             .message(model.notice ?? "Looking for your headphones…", connect: model.disconnectedHeadsets)
         }
@@ -83,13 +75,13 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     /// The menu bar icon: over-ear headphones, distinct from the system's own
     /// headphones symbol, dimmed while no headset is connected.
     private func updateIcon() {
-        let mode = model.noise.flatMap { noise in Self.modes.first { $0.0 == noise.mode } }
-        let description = mode.map { "Sound Connect: \($0.1)" } ?? "Sound Connect: not connected"
+        let mode = model.device?.modes.first { $0.mode == model.mode }
+        let description = mode.map { "Sound Connect: \($0.name)" } ?? "Sound Connect: not connected"
         let image = NSImage(systemSymbolName: "beats.headphones", accessibilityDescription: description)?
             .withSymbolConfiguration(.init(pointSize: 15, weight: .regular))
         image?.isTemplate = true
         statusItem.button?.image = image
-        statusItem.button?.appearsDisabled = model.noise == nil
+        statusItem.button?.appearsDisabled = model.device == nil
     }
 
     private func build(_ layout: Layout) {
@@ -99,10 +91,9 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         levelItem = nil
         levelView = nil
         focusItem = nil
-        speakToChatItem = nil
-        equalizerItem = nil
+        featureItems = []
         presetItems = []
-        dseeItem = nil
+        autoOffItems = []
 
         // Views inside menus need a real frame; SwiftUI sizes the header itself.
         let header = NSHostingView(rootView: HeaderView(model: model))
@@ -122,44 +113,32 @@ final class StatusMenu: NSObject, NSMenuDelegate {
                 menu.addItem(item)
             }
 
-        case .controls:
-            menu.addItem(.sectionHeader(title: "Noise Control"))
-            for (index, (mode, title, icon)) in Self.modes.enumerated() {
-                let item = actionItem(title, #selector(selectMode(_:)))
-                item.tag = index
-                item.image = symbol(icon)
-                menu.addItem(item)
-                modeItems.append(item)
-
-                // Ambient options sit right under Ambient Sound, shown while it's on.
-                if mode == .ambient {
-                    let slider = LevelSliderView { [weak self] level in self?.model.setAmbientLevel(level) }
-                    levelView = slider
-                    levelItem = viewItem(slider)
-                    menu.addItem(levelItem!)
-
-                    focusItem = actionItem("Focus on Voice", #selector(toggleFocusOnVoice))
-                    focusItem!.indentationLevel = 1
-                    menu.addItem(focusItem!)
+        case .controls(let device):
+            addModes(of: device)
+            if !device.features.isEmpty {
+                menu.addItem(.separator())
+                for feature in device.features {
+                    let item = actionItem(featureName(feature: feature), #selector(toggleFeature(_:)))
+                    item.representedObject = feature
+                    item.image = symbol(Self.icon(for: feature))
+                    item.toolTip = featureDescription(feature: feature)
+                    menu.addItem(item)
+                    featureItems.append((feature, item))
                 }
             }
-
-            menu.addItem(.separator())
-            speakToChatItem = actionItem("Speak-to-Chat", #selector(toggleSpeakToChat))
-            speakToChatItem!.image = symbol("bubble.left.and.bubble.right")
-            speakToChatItem!.toolTip = "Switches to ambient sound when you start talking"
-            menu.addItem(speakToChatItem!)
-
-            menu.addItem(.separator())
-            menu.addItem(.sectionHeader(title: "Sound"))
-            equalizerItem = NSMenuItem(title: "Equalizer", action: nil, keyEquivalent: "")
-            equalizerItem!.image = symbol("slider.vertical.3")
-            equalizerItem!.submenu = equalizerMenu()
-            menu.addItem(equalizerItem!)
-            dseeItem = actionItem("DSEE Extreme", #selector(toggleDsee))
-            dseeItem!.image = symbol("waveform")
-            dseeItem!.toolTip = "Restores detail lost in compressed music"
-            menu.addItem(dseeItem!)
+            if device.equalizer != nil {
+                menu.addItem(.separator())
+                let item = NSMenuItem(title: "Equalizer", action: nil, keyEquivalent: "")
+                item.image = symbol("slider.vertical.3")
+                item.submenu = equalizerMenu()
+                menu.addItem(item)
+            }
+            if !device.autoOff.isEmpty {
+                let item = NSMenuItem(title: "Turn Off When Unused", action: nil, keyEquivalent: "")
+                item.image = symbol("moon.zzz")
+                item.submenu = autoOffMenu(device.autoOff)
+                menu.addItem(item)
+            }
         }
 
         menu.addItem(.separator())
@@ -168,26 +147,57 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         menu.addItem(actionItem("Quit Sound Connect", #selector(quit), key: "q"))
     }
 
+    private func addModes(of device: Device) {
+        guard !device.modes.isEmpty else { return }
+        menu.addItem(.sectionHeader(title: "Noise Control"))
+        for mode in device.modes {
+            let item = actionItem(mode.name, #selector(selectMode(_:)))
+            item.representedObject = mode.mode
+            item.image = symbol(Self.icon(for: mode.mode))
+            menu.addItem(item)
+            modeItems.append((mode.mode, item))
+
+            // Ambient options sit right under their mode, shown while it's on.
+            if mode.mode == .ambient, let ambient = device.ambient {
+                let slider = LevelSliderView(range: ambient.minLevel...ambient.maxLevel) { [weak self] level in
+                    self?.model.change(.ambientLevel(level: level))
+                }
+                levelView = slider
+                let levelItem = viewItem(slider)
+                self.levelItem = levelItem
+                menu.addItem(levelItem)
+
+                if ambient.focusOnVoice {
+                    let focusItem = actionItem("Focus on Voice", #selector(toggleFocusOnVoice))
+                    focusItem.indentationLevel = 1
+                    self.focusItem = focusItem
+                    menu.addItem(focusItem)
+                }
+            }
+        }
+    }
+
     private func update() {
         openAtLoginItem?.state = SMAppService.mainApp.status == .enabled ? .on : .off
-        guard let noise = model.noise else { return }
-        let ambient = noise.mode == .ambient
-        for (item, (mode, _, _)) in zip(modeItems, Self.modes) {
-            item.state = noise.mode == mode ? .on : .off
-            if mode == .windReduction { item.isHidden = model.profile?.windReduction != true }
+        for (mode, item) in modeItems {
+            item.state = model.mode == mode ? .on : .off
         }
+        let ambient = model.mode == .ambient
         levelItem?.isHidden = !ambient
-        levelView?.level = noise.ambientLevel
+        if let level = model.ambientLevel { levelView?.level = level }
         focusItem?.isHidden = !ambient
-        focusItem?.state = noise.focusOnVoice ? .on : .off
-        speakToChatItem?.isHidden = model.speakToChat == nil
-        speakToChatItem?.state = model.speakToChat == true ? .on : .off
-        equalizerItem?.isHidden = model.equalizer == nil
+        focusItem?.state = model.focusOnVoice == true ? .on : .off
+        for (feature, item) in featureItems {
+            // Hidden until the headset has reported it.
+            item.isHidden = model.features[feature] == nil
+            item.state = model.features[feature] == true ? .on : .off
+        }
         for (preset, item) in presetItems {
             item.state = model.equalizer?.preset == preset ? .on : .off
         }
-        dseeItem?.isHidden = model.dsee == nil
-        dseeItem?.state = model.dsee == true ? .on : .off
+        for (choice, item) in autoOffItems {
+            item.state = model.autoOff == choice ? .on : .off
+        }
     }
 
     private func equalizerMenu() -> NSMenu {
@@ -204,10 +214,23 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         return submenu
     }
 
+    private func autoOffMenu(_ choices: [AutoOff]) -> NSMenu {
+        let submenu = NSMenu()
+        submenu.autoenablesItems = false
+        for choice in choices {
+            let item = actionItem(autoOffName(autoOff: choice), #selector(selectAutoOff(_:)))
+            item.representedObject = choice
+            submenu.addItem(item)
+            autoOffItems.append((choice, item))
+        }
+        return submenu
+    }
+
     /// Re-renders whenever anything the menu shows changes.
     private func observe() {
         withObservationTracking {
-            _ = (model.connection, model.noise, model.speakToChat, model.disconnectedHeadsets, model.equalizer, model.dsee, model.notice)
+            _ = (model.connection, model.device, model.mode, model.ambientLevel, model.focusOnVoice)
+            _ = (model.features, model.autoOff, model.equalizer, model.disconnectedHeadsets, model.notice)
         } onChange: {
             Task { @MainActor [weak self] in
                 self?.refresh()
@@ -220,27 +243,28 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     // MARK: Actions
 
     @objc private func selectMode(_ item: NSMenuItem) {
-        model.setMode(Self.modes[item.tag].0)
+        if let mode = item.representedObject as? ListeningMode { model.change(.mode(mode: mode)) }
     }
 
     @objc private func toggleFocusOnVoice() {
-        model.setFocusOnVoice(!(model.noise?.focusOnVoice ?? false))
+        model.change(.focusOnVoice(on: model.focusOnVoice != true))
     }
 
-    @objc private func toggleSpeakToChat() {
-        model.setSpeakToChat(!(model.speakToChat ?? false))
+    @objc private func toggleFeature(_ item: NSMenuItem) {
+        guard let feature = item.representedObject as? Feature else { return }
+        model.change(.feature(feature: feature, on: model.features[feature] != true))
     }
 
     @objc private func selectPreset(_ item: NSMenuItem) {
-        if let preset = item.representedObject as? EqPreset { model.setPreset(preset) }
+        if let preset = item.representedObject as? EqPreset { model.change(.equalizerPreset(preset: preset)) }
+    }
+
+    @objc private func selectAutoOff(_ item: NSMenuItem) {
+        if let choice = item.representedObject as? AutoOff { model.change(.autoOff(autoOff: choice)) }
     }
 
     @objc private func editEqualizer() {
         EqualizerWindow.show(model: model)
-    }
-
-    @objc private func toggleDsee() {
-        model.setDsee(!(model.dsee ?? false))
     }
 
     @objc private func connectHeadset(_ item: NSMenuItem) {
@@ -257,6 +281,24 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     }
 
     // MARK: Helpers
+
+    private static func icon(for mode: ListeningMode) -> String {
+        switch mode {
+        case .off: "person.crop.circle"
+        case .ambient: "person.wave.2"
+        case .noiseCancelling: "person.crop.circle.fill"
+        case .noiseCancellingLow: "person.crop.circle.badge.minus"
+        case .windReduction: "wind"
+        }
+    }
+
+    private static func icon(for feature: Feature) -> String {
+        switch feature {
+        case .speakToChat: "bubble.left.and.bubble.right"
+        case .dsee: "waveform"
+        case .voicePrompts: "speaker.wave.2.bubble"
+        }
+    }
 
     private func actionItem(_ title: String, _ action: Selector, key: String = "") -> NSMenuItem {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
@@ -325,7 +367,7 @@ private struct HeaderView: View {
         case .unsupported: return "Not supported yet"
         case .connected:
             // Be upfront when this model's support hasn't been tried yet.
-            let untested = model.profile.map { !$0.tested } == true ? "Untested model" : nil
+            let untested = model.device.map { !$0.tested } == true ? "Untested model" : nil
             return ["Connected", model.codec, untested]
                 .compactMap { $0 }
                 .joined(separator: " · ")
@@ -367,7 +409,7 @@ private struct BatteryLabel: View {
 private final class LevelSliderView: NSView {
     /// Lines up with the indented "Focus on Voice" item below it.
     private static let indent: CGFloat = 62
-    private let slider = NSSlider(value: 20, minValue: 1, maxValue: 20, target: nil, action: nil)
+    private let slider: NSSlider
     private let onChange: (UInt8) -> Void
 
     var level: UInt8 {
@@ -378,8 +420,11 @@ private final class LevelSliderView: NSView {
         }
     }
 
-    init(onChange: @escaping (UInt8) -> Void) {
+    init(range: ClosedRange<UInt8>, onChange: @escaping (UInt8) -> Void) {
         self.onChange = onChange
+        slider = NSSlider(
+            value: Double(range.upperBound), minValue: Double(range.lowerBound), maxValue: Double(range.upperBound),
+            target: nil, action: nil)
         super.init(frame: NSRect(x: 0, y: 0, width: 290, height: 46))
 
         let label = NSTextField(labelWithString: "Ambient Sound Level")

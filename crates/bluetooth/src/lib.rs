@@ -1,12 +1,13 @@
-//! Keeps a link to the connected Sony headset on a background thread.
+//! Keeps a link to a connected headset on a background thread.
 //!
-//! The UI sends [`Request`]s and receives [`Event`]s. The thread finds the
-//! headset, opens the vendor channel, runs the protocol [`Session`] and
-//! reconnects on its own when the headset goes away.
+//! The UI sends [`Setting`]s and receives [`Event`]s. The thread finds a
+//! headset offering a supported control service, opens that channel, lets
+//! the brand's [driver](sc_core::Driver) speak to it and reconnects on its
+//! own when the headset goes away.
 
 use std::sync::mpsc;
 
-pub use sc_protocol::{Battery, Codec, NoiseControl, NoiseMode, Request, Update};
+use sc_core::{Setting, Update};
 
 #[cfg(target_os = "linux")]
 mod linux;
@@ -19,15 +20,17 @@ mod unsupported;
 pub enum Event {
     /// No supported headset is connected; still looking.
     Searching,
-    Connected { name: String },
+    Connected {
+        name: String,
+    },
     Update(Update),
     Disconnected,
-    /// This platform or headset can't be controlled yet.
+    /// This platform can't control headsets yet.
     Unsupported(String),
 }
 
 pub struct Link {
-    pub requests: mpsc::Sender<Request>,
+    pub requests: mpsc::Sender<Setting>,
     pub events: async_channel::Receiver<Event>,
 }
 
@@ -49,13 +52,3 @@ pub fn start(name_filter: Option<String>) -> Link {
         .expect("failed to start the Bluetooth thread");
     Link { requests, events }
 }
-
-/// Requests sent right after connecting, to fill in the UI.
-pub(crate) const INITIAL_REQUESTS: [Request; 6] = [
-    Request::Init,
-    Request::FirmwareVersion,
-    Request::Battery,
-    Request::Codec,
-    Request::NoiseControl,
-    Request::SpeakToChat,
-];

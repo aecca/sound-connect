@@ -1,12 +1,12 @@
 [package]
 name = "sound-connect"
-description = "Control your Sony headphones from the menu bar"
+description = "Control your Sony and Bose headphones from the menu bar"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
-sc-protocol.workspace = true
+sc-core.workspace = true
 sc-bluetooth.workspace = true
 async-channel.workspace = true
 gpui-kit = "0.8"

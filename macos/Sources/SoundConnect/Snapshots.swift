@@ -15,14 +15,15 @@ enum Snapshots {
     static func sampleModel() -> HeadsetModel {
         let model = HeadsetModel()
         model.connection = .connected(name: "WH-1000XM5")
-        model.profile = profileFor(name: "WH-1000XM5")
+        model.device = serviceUuids().lazy.compactMap { headsetFor(name: "WH-1000XM5", service: $0) }.first?.device()
         model.battery = Battery(level: 80, charging: false)
         model.codec = "AAC"
         model.firmware = "2.4.1"
-        model.noise = NoiseControl(mode: .ambient, focusOnVoice: true, ambientLevel: 14, layout: .standard)
-        model.speakToChat = false
+        model.mode = .ambient
+        model.ambientLevel = 14
+        model.focusOnVoice = true
+        model.features = [.speakToChat: false, .dsee: true]
         model.equalizer = Equalizer(preset: .manual, bands: .five(clearBass: 3, bands: [2, 1, 0, 1, 3]))
-        model.dsee = true
         return model
     }
 

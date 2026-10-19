@@ -1,25 +1,18 @@
-//! What each headset model supports, so apps only offer controls that work
-//! and ask for the right things after connecting.
+//! What each Sony model supports, so the app only offers controls that work
+//! and asks for the right things after connecting.
 //!
 //! Capabilities come from Sony Device Center's `DeviceProfileRegistry.cpp`
 //! (MIT) and Gadgetbridge's per-model coordinators. Only models marked
 //! `tested` have been tried on real hardware by this project.
 
-use crate::command::{EqLayout, Request};
+use super::command::Request;
+use crate::device::{Ambient, BatteryLayout, Brand, Device, Feature, ListeningMode, Mode};
+use crate::equalizer::EqLayout;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BatteryLayout {
-    /// One battery (over-ear headphones).
-    Single,
-    /// Left and right earbuds plus the charging case.
-    Earbuds,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Profile {
+pub(super) struct Profile {
     /// The model's name, or "" when it isn't recognized.
     pub model: &'static str,
-    /// Confirmed working on real hardware.
     pub tested: bool,
     pub battery: BatteryLayout,
     pub wind_reduction: bool,
@@ -30,7 +23,7 @@ pub struct Profile {
 
 /// Headsets that aren't in the list get the WH-1000XM5's feature set, the
 /// common v2 one. Anything they don't answer simply stays hidden.
-pub const UNKNOWN: Profile = Profile {
+const UNKNOWN: Profile = Profile {
     model: "",
     tested: false,
     battery: BatteryLayout::Single,
@@ -61,7 +54,7 @@ const PROFILES: [(&[&str], Profile); 8] = [
 ];
 
 /// The profile for a headset, from its Bluetooth name.
-pub fn profile_for(name: &str) -> Profile {
+pub(super) fn profile_for(name: &str) -> Profile {
     let name = name.to_uppercase();
     PROFILES
         .iter()
@@ -69,12 +62,34 @@ pub fn profile_for(name: &str) -> Profile {
         .map_or(UNKNOWN, |(_, profile)| *profile)
 }
 
-/// Every model with a profile, for listing what's supported.
-pub fn known_profiles() -> impl Iterator<Item = Profile> {
-    PROFILES.iter().map(|(_, profile)| *profile)
-}
-
 impl Profile {
+    /// The headset as apps see it. `name` stands in for an unknown model.
+    pub fn device(&self, name: &str) -> Device {
+        let mut modes = vec![
+            Mode { mode: ListeningMode::Off, name: "Off" },
+            Mode { mode: ListeningMode::Ambient, name: "Ambient Sound" },
+            Mode { mode: ListeningMode::NoiseCancelling, name: "Noise Cancelling" },
+        ];
+        if self.wind_reduction {
+            modes.push(Mode { mode: ListeningMode::WindReduction, name: "Wind Noise Reduction" });
+        }
+        let features = [(self.speak_to_chat, Feature::SpeakToChat), (self.dsee, Feature::Dsee)]
+            .into_iter()
+            .filter_map(|(has, feature)| has.then_some(feature))
+            .collect();
+        Device {
+            brand: Brand::Sony,
+            model: if self.model.is_empty() { name.to_owned() } else { self.model.to_owned() },
+            tested: self.tested,
+            battery: self.battery,
+            modes,
+            ambient: Some(Ambient { levels: 1..=20, focus_on_voice: true }),
+            features,
+            auto_off: Vec::new(),
+            equalizer: self.equalizer,
+        }
+    }
+
     /// What to ask the headset right after connecting, to fill in the UI.
     pub fn initial_requests(&self) -> Vec<Request> {
         let mut requests = vec![Request::Init, Request::FirmwareVersion];
@@ -117,7 +132,7 @@ mod tests {
 
     #[test]
     fn only_the_xm5_is_marked_tested() {
-        let tested: Vec<_> = known_profiles().filter(|p| p.tested).map(|p| p.model).collect();
+        let tested: Vec<_> = PROFILES.iter().filter(|(_, p)| p.tested).map(|(_, p)| p.model).collect();
         assert_eq!(tested, ["WH-1000XM5"]);
     }
 
@@ -142,5 +157,18 @@ mod tests {
         assert!(!earbuds.contains(&Request::Battery));
         assert!(!profile_for("WH-CH720N").initial_requests().contains(&Request::SpeakToChat));
         assert!(profile_for("WH-1000XM6").initial_requests().contains(&Request::Equalizer(EqLayout::TenBands)));
+    }
+
+    #[test]
+    fn describes_the_device_for_apps() {
+        let xm5 = profile_for("WH-1000XM5").device("WH-1000XM5");
+        assert_eq!(xm5.features, [Feature::SpeakToChat, Feature::Dsee]);
+        assert_eq!(xm5.modes.len(), 3);
+
+        let wf = profile_for("WF-1000XM5").device("WF-1000XM5");
+        assert!(wf.modes.iter().any(|mode| mode.mode == ListeningMode::WindReduction));
+
+        let unknown = profile_for("Sony Speaker").device("Sony Speaker");
+        assert_eq!((unknown.model.as_str(), unknown.tested), ("Sony Speaker", false));
     }
 }

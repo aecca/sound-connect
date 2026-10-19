@@ -1,48 +1,98 @@
-//! Exposes the protocol core to Swift through UniFFI, so the native macOS
-//! app and the Rust apps share one implementation of the headset protocol.
+//! Exposes the headphone drivers to Swift through UniFFI, so the native
+//! macOS app and the Rust apps share one implementation of every protocol.
 //!
-//! The Swift side owns the Bluetooth channel: it passes received bytes to
-//! [`Session::receive`] and writes every frame the session returns.
+//! The Swift side owns the Bluetooth channel: it looks for one of the
+//! [`service_uuids`], gets a [`Headset`] for the device with [`headset_for`],
+//! passes it what the channel reads and writes out every frame it returns.
 
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use sc_protocol as core;
+use sc_core::{Battery, BatteryLayout, Brand, Driver, EqLayout, Feature, ListeningMode};
 
 uniffi::setup_scaffolding!();
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
-pub enum NoiseMode {
+// Plain types from sc-core, exported as they are.
+
+#[uniffi::remote(Enum)]
+pub enum Brand {
+    Sony,
+    Bose,
+}
+
+#[uniffi::remote(Enum)]
+pub enum BatteryLayout {
+    Single,
+    Earbuds,
+}
+
+#[uniffi::remote(Enum)]
+pub enum ListeningMode {
     NoiseCancelling,
+    NoiseCancellingLow,
+    WindReduction,
     Ambient,
     Off,
-    WindReduction,
 }
 
-/// How the headset lays out its noise-control message; keep the one it
-/// reported when sending changes back.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
-pub enum NoiseLayout {
-    Standard,
-    WithWind,
+#[uniffi::remote(Enum)]
+pub enum Feature {
+    SpeakToChat,
+    Dsee,
+    VoicePrompts,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Record)]
-pub struct NoiseControl {
-    pub mode: NoiseMode,
-    pub focus_on_voice: bool,
-    /// 1...20
-    pub ambient_level: u8,
-    pub layout: NoiseLayout,
+#[uniffi::remote(Enum)]
+pub enum EqLayout {
+    FiveBands,
+    TenBands,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Record)]
+#[uniffi::remote(Record)]
 pub struct Battery {
-    pub level: u8,
-    pub charging: bool,
+    level: u8,
+    charging: bool,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+// Types that need a shape Swift can take: ranges, static strings, fixed-size
+// arrays and unnamed fields become plain records and named fields.
+
+/// A listening mode under the name the brand gives it.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct Mode {
+    pub mode: ListeningMode,
+    pub name: String,
+}
+
+/// What can be adjusted in ambient mode.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct Ambient {
+    pub min_level: u8,
+    pub max_level: u8,
+    pub focus_on_voice: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, uniffi::Enum)]
+pub enum AutoOff {
+    Never,
+    Minutes { minutes: u16 },
+}
+
+/// A headset and the controls it offers. See `sc_core::Device`.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct Device {
+    pub brand: Brand,
+    pub model: String,
+    pub tested: bool,
+    pub battery: BatteryLayout,
+    pub modes: Vec<Mode>,
+    pub ambient: Option<Ambient>,
+    pub features: Vec<Feature>,
+    pub auto_off: Vec<AutoOff>,
+    pub equalizer: Option<EqLayout>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, uniffi::Enum)]
 pub enum EqPreset {
     Off,
     Bright,
@@ -59,14 +109,6 @@ pub enum EqPreset {
     Unknown { code: u8 },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
-pub enum EqLayout {
-    /// Five bands plus Clear Bass.
-    FiveBands,
-    /// Ten bands, no Clear Bass.
-    TenBands,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
 pub enum EqBands {
     /// Steps from -10 to +10: 400 Hz, 1 kHz, 2.5 kHz, 6.3 kHz, 16 kHz.
@@ -81,207 +123,172 @@ pub struct Equalizer {
     pub bands: EqBands,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
-pub enum BatteryLayout {
-    Single,
-    Earbuds,
-}
-
-/// What a headset model supports. See `sc_protocol::profile`.
-#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
-pub struct Profile {
-    /// The model's name, or "" when it isn't recognized.
-    pub model: String,
-    /// Confirmed working on real hardware.
-    pub tested: bool,
-    pub battery: BatteryLayout,
-    pub wind_reduction: bool,
-    pub speak_to_chat: bool,
-    pub equalizer: Option<EqLayout>,
-    pub dsee: bool,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
-pub enum Request {
-    Init,
-    FirmwareVersion,
-    Battery,
-    EarbudBattery,
-    CaseBattery,
-    Codec,
-    NoiseControl,
-    SetNoiseControl { value: NoiseControl },
-    SpeakToChat,
-    SetSpeakToChat { on: bool },
-    Equalizer { layout: EqLayout },
-    SetEqualizerPreset { layout: EqLayout, preset: EqPreset },
-    /// Switches to the Manual preset with these values.
-    SetEqualizerBands { bands: EqBands },
-    Dsee,
-    SetDsee { on: bool },
-}
-
+/// Something the headset reported. See `sc_core::Update`.
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
 pub enum Update {
-    /// The headset answered the handshake. `v2` is false for older headsets,
-    /// which aren't supported yet.
-    Ready { v2: bool },
+    Device { device: Device },
+    Unsupported { reason: String },
     Firmware { version: String },
-    Battery { battery: Battery },
-    /// `None` for an earbud that isn't reporting, e.g. while in its case.
-    EarbudBattery { left: Option<Battery>, right: Option<Battery> },
-    CaseBattery { battery: Battery },
     Codec { name: String },
-    NoiseControl { value: NoiseControl },
-    SpeakToChat { on: bool },
-    Equalizer { value: Equalizer },
-    Dsee { on: bool },
+    Battery { battery: Battery },
+    Earbuds { left: Option<Battery>, right: Option<Battery> },
+    CaseBattery { battery: Battery },
+    Mode { mode: ListeningMode },
+    AmbientLevel { level: u8 },
+    FocusOnVoice { on: bool },
+    Feature { feature: Feature, on: bool },
+    AutoOff { auto_off: AutoOff },
+    Equalizer { equalizer: Equalizer },
 }
 
+/// Something the user changed. See `sc_core::Setting`.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum Setting {
+    Mode { mode: ListeningMode },
+    AmbientLevel { level: u8 },
+    FocusOnVoice { on: bool },
+    Feature { feature: Feature, on: bool },
+    AutoOff { auto_off: AutoOff },
+    EqualizerPreset { preset: EqPreset },
+    EqualizerBands { bands: EqBands },
+}
+
+/// What to do after the headset said something: frames to write, in order,
+/// and changes to show.
 #[derive(Debug, uniffi::Record)]
 pub struct Output {
-    /// Frames to write to the headset, in order.
     pub writes: Vec<Vec<u8>>,
     pub updates: Vec<Update>,
 }
 
-/// Conversation state with one headset. See `sc_protocol::Session`.
+/// One connected headset and the driver that speaks to it.
 #[derive(uniffi::Object)]
-pub struct Session(Mutex<core::Session>);
+pub struct Headset(Mutex<Box<dyn Driver>>);
+
+/// The control services of supported headsets, in order of preference.
+#[uniffi::export]
+pub fn service_uuids() -> Vec<String> {
+    sc_core::SERVICES.iter().map(|service| (*service).to_owned()).collect()
+}
+
+/// The headset with this Bluetooth name, given the control service it offers.
+#[uniffi::export]
+pub fn headset_for(name: String, service: String) -> Option<Arc<Headset>> {
+    sc_core::driver_for(&name, &service).map(|driver| Arc::new(Headset(Mutex::new(driver))))
+}
 
 #[uniffi::export]
-impl Session {
-    #[uniffi::constructor]
-    pub fn new() -> Arc<Self> {
-        Arc::new(Self(Mutex::new(core::Session::default())))
+impl Headset {
+    pub fn device(&self) -> Device {
+        self.driver().device().clone().into()
     }
 
-    /// Queues a request; returns the frames to write now.
-    pub fn request(&self, request: Request) -> Vec<Vec<u8>> {
-        self.0.lock().unwrap().request(request.into(), Instant::now())
+    /// Call once the channel is open.
+    pub fn start(&self) -> Output {
+        self.driver().start(Instant::now()).into()
     }
 
     pub fn receive(&self, bytes: Vec<u8>) -> Output {
-        let out = self.0.lock().unwrap().receive(&bytes, Instant::now());
-        Output { writes: out.writes, updates: out.updates.into_iter().map(Into::into).collect() }
+        self.driver().receive(&bytes, Instant::now()).into()
     }
 
-    /// Call a few times per second; returns frames to resend or send next.
+    /// Returns the frames to write for a change the user made.
+    pub fn set(&self, setting: Setting) -> Vec<Vec<u8>> {
+        self.driver().set(setting.into(), Instant::now())
+    }
+
+    /// Call every minute or so, for values that change on their own.
+    pub fn refresh(&self) -> Vec<Vec<u8>> {
+        self.driver().refresh(Instant::now())
+    }
+
+    /// Call a few times a second.
     pub fn tick(&self) -> Vec<Vec<u8>> {
-        self.0.lock().unwrap().tick(Instant::now())
+        self.driver().tick(Instant::now())
     }
 }
 
-/// The profile for a headset, from its Bluetooth name.
-#[uniffi::export]
-pub fn profile_for(name: String) -> Profile {
-    core::profile_for(&name).into()
+impl Headset {
+    fn driver(&self) -> std::sync::MutexGuard<'_, Box<dyn Driver>> {
+        // A panic while holding the lock leaves the driver as it was; keep using it.
+        self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
 }
 
-/// What to ask the headset right after connecting.
-#[uniffi::export]
-pub fn initial_requests(profile: Profile) -> Vec<Request> {
-    core::Profile::from(profile).initial_requests().into_iter().map(Into::into).collect()
-}
-
-/// What to ask to refresh the battery levels.
-#[uniffi::export]
-pub fn battery_requests(profile: Profile) -> Vec<Request> {
-    core::Profile::from(profile).battery_requests().into_iter().map(Into::into).collect()
-}
-
-/// Every preset, in the order Sony's app lists them.
+/// Every equalizer preset, in the order Sony's app lists them.
 #[uniffi::export]
 pub fn eq_presets() -> Vec<EqPreset> {
-    core::EqPreset::ALL.into_iter().map(Into::into).collect()
+    sc_core::EqPreset::ALL.into_iter().map(Into::into).collect()
 }
 
-/// The preset's display name, e.g. "Bass Boost".
 #[uniffi::export]
 pub fn eq_preset_name(preset: EqPreset) -> String {
-    core::EqPreset::from(preset).name()
+    sc_core::EqPreset::from(preset).name()
 }
 
-/// The control-channel service UUIDs Sony headsets advertise, newest first.
 #[uniffi::export]
-pub fn service_uuids() -> Vec<String> {
-    core::SERVICE_UUIDS.iter().map(|uuid| uuid.to_string()).collect()
+pub fn brand_name(brand: Brand) -> String {
+    brand.name().to_owned()
 }
 
-// Conversions between the FFI types and the core ones. They mirror each other
-// field by field.
-
-impl From<core::NoiseMode> for NoiseMode {
-    fn from(mode: core::NoiseMode) -> Self {
-        match mode {
-            core::NoiseMode::NoiseCancelling => Self::NoiseCancelling,
-            core::NoiseMode::Ambient => Self::Ambient,
-            core::NoiseMode::Off => Self::Off,
-            core::NoiseMode::WindReduction => Self::WindReduction,
-        }
-    }
+#[uniffi::export]
+pub fn feature_name(feature: Feature) -> String {
+    feature.name().to_owned()
 }
 
-impl From<NoiseMode> for core::NoiseMode {
-    fn from(mode: NoiseMode) -> Self {
-        match mode {
-            NoiseMode::NoiseCancelling => Self::NoiseCancelling,
-            NoiseMode::Ambient => Self::Ambient,
-            NoiseMode::Off => Self::Off,
-            NoiseMode::WindReduction => Self::WindReduction,
-        }
-    }
+#[uniffi::export]
+pub fn feature_description(feature: Feature) -> String {
+    feature.description().to_owned()
 }
 
-impl From<core::NoiseLayout> for NoiseLayout {
-    fn from(layout: core::NoiseLayout) -> Self {
-        match layout {
-            core::NoiseLayout::Standard => Self::Standard,
-            core::NoiseLayout::WithWind => Self::WithWind,
-        }
-    }
+#[uniffi::export]
+pub fn auto_off_name(auto_off: AutoOff) -> String {
+    sc_core::AutoOff::from(auto_off).name()
 }
 
-impl From<NoiseLayout> for core::NoiseLayout {
-    fn from(layout: NoiseLayout) -> Self {
-        match layout {
-            NoiseLayout::Standard => Self::Standard,
-            NoiseLayout::WithWind => Self::WithWind,
-        }
-    }
-}
+// Conversions to and from the sc-core types.
 
-impl From<core::NoiseControl> for NoiseControl {
-    fn from(nc: core::NoiseControl) -> Self {
+impl From<sc_core::Device> for Device {
+    fn from(device: sc_core::Device) -> Self {
         Self {
-            mode: nc.mode.into(),
-            focus_on_voice: nc.focus_on_voice,
-            ambient_level: nc.ambient_level,
-            layout: nc.layout.into(),
+            brand: device.brand,
+            model: device.model,
+            tested: device.tested,
+            battery: device.battery,
+            modes: device.modes.into_iter().map(|mode| Mode { mode: mode.mode, name: mode.name.to_owned() }).collect(),
+            ambient: device.ambient.map(|ambient| Ambient {
+                min_level: *ambient.levels.start(),
+                max_level: *ambient.levels.end(),
+                focus_on_voice: ambient.focus_on_voice,
+            }),
+            features: device.features,
+            auto_off: device.auto_off.into_iter().map(Into::into).collect(),
+            equalizer: device.equalizer,
         }
     }
 }
 
-impl From<NoiseControl> for core::NoiseControl {
-    fn from(nc: NoiseControl) -> Self {
-        Self {
-            mode: nc.mode.into(),
-            focus_on_voice: nc.focus_on_voice,
-            ambient_level: nc.ambient_level,
-            layout: nc.layout.into(),
+impl From<sc_core::AutoOff> for AutoOff {
+    fn from(auto_off: sc_core::AutoOff) -> Self {
+        match auto_off {
+            sc_core::AutoOff::Never => Self::Never,
+            sc_core::AutoOff::Minutes(minutes) => Self::Minutes { minutes },
         }
     }
 }
 
-impl From<core::Battery> for Battery {
-    fn from(b: core::Battery) -> Self {
-        Self { level: b.level, charging: b.charging }
+impl From<AutoOff> for sc_core::AutoOff {
+    fn from(auto_off: AutoOff) -> Self {
+        match auto_off {
+            AutoOff::Never => Self::Never,
+            AutoOff::Minutes { minutes } => Self::Minutes(minutes),
+        }
     }
 }
 
-impl From<core::EqPreset> for EqPreset {
-    fn from(preset: core::EqPreset) -> Self {
-        use core::EqPreset as P;
+impl From<sc_core::EqPreset> for EqPreset {
+    fn from(preset: sc_core::EqPreset) -> Self {
+        use sc_core::EqPreset as P;
         match preset {
             P::Off => Self::Off,
             P::Bright => Self::Bright,
@@ -300,7 +307,7 @@ impl From<core::EqPreset> for EqPreset {
     }
 }
 
-impl From<EqPreset> for core::EqPreset {
+impl From<EqPreset> for sc_core::EqPreset {
     fn from(preset: EqPreset) -> Self {
         match preset {
             EqPreset::Off => Self::Off,
@@ -320,34 +327,16 @@ impl From<EqPreset> for core::EqPreset {
     }
 }
 
-impl From<core::EqLayout> for EqLayout {
-    fn from(layout: core::EqLayout) -> Self {
-        match layout {
-            core::EqLayout::FiveBands => Self::FiveBands,
-            core::EqLayout::TenBands => Self::TenBands,
-        }
-    }
-}
-
-impl From<EqLayout> for core::EqLayout {
-    fn from(layout: EqLayout) -> Self {
-        match layout {
-            EqLayout::FiveBands => Self::FiveBands,
-            EqLayout::TenBands => Self::TenBands,
-        }
-    }
-}
-
-impl From<core::EqBands> for EqBands {
-    fn from(bands: core::EqBands) -> Self {
+impl From<sc_core::EqBands> for EqBands {
+    fn from(bands: sc_core::EqBands) -> Self {
         match bands {
-            core::EqBands::Five { clear_bass, bands } => Self::Five { clear_bass, bands: bands.to_vec() },
-            core::EqBands::Ten(bands) => Self::Ten { bands: bands.to_vec() },
+            sc_core::EqBands::Five { clear_bass, bands } => Self::Five { clear_bass, bands: bands.to_vec() },
+            sc_core::EqBands::Ten(bands) => Self::Ten { bands: bands.to_vec() },
         }
     }
 }
 
-impl From<EqBands> for core::EqBands {
+impl From<EqBands> for sc_core::EqBands {
     fn from(bands: EqBands) -> Self {
         match bands {
             EqBands::Five { clear_bass, bands } => Self::Five { clear_bass, bands: fixed(bands) },
@@ -356,119 +345,80 @@ impl From<EqBands> for core::EqBands {
     }
 }
 
-/// Copies a list into a fixed-size array, padding with zeros or dropping extras.
+/// Copies a list into a fixed-size array: missing values are zero, extra
+/// ones are dropped.
 fn fixed<T: Copy + Default, const N: usize>(values: Vec<T>) -> [T; N] {
-    let mut out = [T::default(); N];
-    for (slot, value) in out.iter_mut().zip(values) {
+    let mut array = [T::default(); N];
+    for (slot, value) in array.iter_mut().zip(values) {
         *slot = value;
     }
-    out
+    array
 }
 
-impl From<core::BatteryLayout> for BatteryLayout {
-    fn from(layout: core::BatteryLayout) -> Self {
-        match layout {
-            core::BatteryLayout::Single => Self::Single,
-            core::BatteryLayout::Earbuds => Self::Earbuds,
-        }
+impl From<sc_core::Equalizer> for Equalizer {
+    fn from(equalizer: sc_core::Equalizer) -> Self {
+        Self { preset: equalizer.preset.into(), bands: equalizer.bands.into() }
     }
 }
 
-impl From<core::Profile> for Profile {
-    fn from(p: core::Profile) -> Self {
-        Self {
-            model: p.model.to_string(),
-            tested: p.tested,
-            battery: p.battery.into(),
-            wind_reduction: p.wind_reduction,
-            speak_to_chat: p.speak_to_chat,
-            equalizer: p.equalizer.map(Into::into),
-            dsee: p.dsee,
-        }
-    }
-}
-
-impl From<Profile> for core::Profile {
-    /// Only the capabilities matter here; the model name is looked up again.
-    fn from(p: Profile) -> Self {
-        Self {
-            model: core::profile_for(&p.model).model,
-            tested: p.tested,
-            battery: match p.battery {
-                BatteryLayout::Single => core::BatteryLayout::Single,
-                BatteryLayout::Earbuds => core::BatteryLayout::Earbuds,
-            },
-            wind_reduction: p.wind_reduction,
-            speak_to_chat: p.speak_to_chat,
-            equalizer: p.equalizer.map(Into::into),
-            dsee: p.dsee,
-        }
-    }
-}
-
-impl From<Request> for core::Request {
-    fn from(request: Request) -> Self {
-        match request {
-            Request::Init => Self::Init,
-            Request::FirmwareVersion => Self::FirmwareVersion,
-            Request::Battery => Self::Battery,
-            Request::EarbudBattery => Self::EarbudBattery,
-            Request::CaseBattery => Self::CaseBattery,
-            Request::Codec => Self::Codec,
-            Request::NoiseControl => Self::NoiseControl,
-            Request::SetNoiseControl { value } => Self::SetNoiseControl(value.into()),
-            Request::SpeakToChat => Self::SpeakToChat,
-            Request::SetSpeakToChat { on } => Self::SetSpeakToChat(on),
-            Request::Equalizer { layout } => Self::Equalizer(layout.into()),
-            Request::SetEqualizerPreset { layout, preset } => Self::SetEqualizerPreset(layout.into(), preset.into()),
-            Request::SetEqualizerBands { bands } => Self::SetEqualizerBands(bands.into()),
-            Request::Dsee => Self::Dsee,
-            Request::SetDsee { on } => Self::SetDsee(on),
-        }
-    }
-}
-
-impl From<core::Request> for Request {
-    fn from(request: core::Request) -> Self {
-        match request {
-            core::Request::Init => Self::Init,
-            core::Request::FirmwareVersion => Self::FirmwareVersion,
-            core::Request::Battery => Self::Battery,
-            core::Request::EarbudBattery => Self::EarbudBattery,
-            core::Request::CaseBattery => Self::CaseBattery,
-            core::Request::Codec => Self::Codec,
-            core::Request::NoiseControl => Self::NoiseControl,
-            core::Request::SetNoiseControl(value) => Self::SetNoiseControl { value: value.into() },
-            core::Request::SpeakToChat => Self::SpeakToChat,
-            core::Request::SetSpeakToChat(on) => Self::SetSpeakToChat { on },
-            core::Request::Equalizer(layout) => Self::Equalizer { layout: layout.into() },
-            core::Request::SetEqualizerPreset(layout, preset) => {
-                Self::SetEqualizerPreset { layout: layout.into(), preset: preset.into() }
-            }
-            core::Request::SetEqualizerBands(bands) => Self::SetEqualizerBands { bands: bands.into() },
-            core::Request::Dsee => Self::Dsee,
-            core::Request::SetDsee(on) => Self::SetDsee { on },
-        }
-    }
-}
-
-impl From<core::Update> for Update {
-    fn from(update: core::Update) -> Self {
+impl From<sc_core::Update> for Update {
+    fn from(update: sc_core::Update) -> Self {
+        use sc_core::Update as U;
         match update {
-            core::Update::Ready { v2 } => Self::Ready { v2 },
-            core::Update::Firmware(version) => Self::Firmware { version },
-            core::Update::Battery(battery) => Self::Battery { battery: battery.into() },
-            core::Update::EarbudBattery { left, right } => {
-                Self::EarbudBattery { left: left.map(Into::into), right: right.map(Into::into) }
-            }
-            core::Update::CaseBattery(battery) => Self::CaseBattery { battery: battery.into() },
-            core::Update::Codec(codec) => Self::Codec { name: codec.name() },
-            core::Update::NoiseControl(nc) => Self::NoiseControl { value: nc.into() },
-            core::Update::SpeakToChat(on) => Self::SpeakToChat { on },
-            core::Update::Equalizer(eq) => {
-                Self::Equalizer { value: Equalizer { preset: eq.preset.into(), bands: eq.bands.into() } }
-            }
-            core::Update::Dsee(on) => Self::Dsee { on },
+            U::Device(device) => Self::Device { device: device.into() },
+            U::Unsupported(reason) => Self::Unsupported { reason },
+            U::Firmware(version) => Self::Firmware { version },
+            U::Codec(name) => Self::Codec { name },
+            U::Battery(battery) => Self::Battery { battery },
+            U::Earbuds { left, right } => Self::Earbuds { left, right },
+            U::CaseBattery(battery) => Self::CaseBattery { battery },
+            U::Mode(mode) => Self::Mode { mode },
+            U::AmbientLevel(level) => Self::AmbientLevel { level },
+            U::FocusOnVoice(on) => Self::FocusOnVoice { on },
+            U::Feature(feature, on) => Self::Feature { feature, on },
+            U::AutoOff(auto_off) => Self::AutoOff { auto_off: auto_off.into() },
+            U::Equalizer(equalizer) => Self::Equalizer { equalizer: equalizer.into() },
         }
+    }
+}
+
+impl From<Setting> for sc_core::Setting {
+    fn from(setting: Setting) -> Self {
+        match setting {
+            Setting::Mode { mode } => Self::Mode(mode),
+            Setting::AmbientLevel { level } => Self::AmbientLevel(level),
+            Setting::FocusOnVoice { on } => Self::FocusOnVoice(on),
+            Setting::Feature { feature, on } => Self::Feature(feature, on),
+            Setting::AutoOff { auto_off } => Self::AutoOff(auto_off.into()),
+            Setting::EqualizerPreset { preset } => Self::EqualizerPreset(preset.into()),
+            Setting::EqualizerBands { bands } => Self::EqualizerBands(bands.into()),
+        }
+    }
+}
+
+impl From<sc_core::Output> for Output {
+    fn from(output: sc_core::Output) -> Self {
+        Self { writes: output.writes, updates: output.updates.into_iter().map(Into::into).collect() }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn finds_drivers_by_service() {
+        let services = service_uuids();
+        let sony = headset_for("WH-1000XM5".into(), services[0].clone()).expect("Sony is supported");
+        assert_eq!(sony.device().brand, Brand::Sony);
+        assert!(headset_for("Speaker".into(), "0000110B-0000-1000-8000-00805F9B34FB".into()).is_none());
+    }
+
+    #[test]
+    fn converts_equalizer_bands_both_ways() {
+        let bands = sc_core::EqBands::Five { clear_bass: 3, bands: [2, 1, 0, -1, -2] };
+        assert_eq!(sc_core::EqBands::from(EqBands::from(bands)), bands);
+        let short = EqBands::Ten { bands: vec![1, 2] };
+        assert_eq!(sc_core::EqBands::from(short), sc_core::EqBands::Ten([1, 2, 0, 0, 0, 0, 0, 0, 0, 0]));
     }
 }

@@ -14,21 +14,20 @@ const ESCAPE: u8 = 0x3d;
 const ESCAPE_MASK: u8 = 0xef;
 
 /// Data types carried in the `kind` byte.
-pub mod kind {
+pub(super) mod kind {
     pub const ACK: u8 = 0x01;
     pub const COMMAND: u8 = 0x0c;
-    pub const COMMAND_2: u8 = 0x0e;
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Message {
+pub(super) struct Message {
     pub kind: u8,
     pub seq: u8,
     pub payload: Vec<u8>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum FrameError {
+pub(super) enum FrameError {
     TooShort,
     BadChecksum,
     BadLength,
@@ -107,7 +106,7 @@ fn checksum(bytes: &[u8]) -> u8 {
 /// Splits an incoming byte stream into messages. Bytes may arrive in
 /// arbitrary chunks; partial frames are kept until the rest arrives.
 #[derive(Default)]
-pub struct FrameReader {
+pub(super) struct FrameReader {
     buf: Vec<u8>,
 }
 

@@ -5,7 +5,7 @@
 <h1 align="center">Sound Connect</h1>
 
 <p align="center">
-  Control your Sony headphones from your Mac or Linux computer.<br>
+  Control your Sony and Bose headphones from your Mac or Linux computer.<br>
   No phone needed.
 </p>
 
@@ -47,6 +47,7 @@ Sound Connect sits in your menu bar (or your system tray on Linux). Click the he
 - 💬 Turn **Speak-to-Chat** on or off, the feature that lets in outside sound when you start talking
 - 🎚️ Pick an **equalizer** preset, or shape your own sound
 - ✨ Turn on **DSEE Extreme** to bring back detail in compressed music
+- 🔕 Turn **voice prompts** on or off, and choose when your headphones **turn off** on their own
 - 🔋 See your **battery level**, including each earbud and the case
 - 🔗 **Connect** your headphones with one click when they're paired but not connected
 
@@ -63,6 +64,8 @@ On Linux, the equalizer, DSEE and one-click connect are coming soon.
 
 ## Supported headphones
 
+**Sony**
+
 - **WH-1000XM5**
 - **WH-1000XM6**
 - **WH-CH720N**
@@ -72,7 +75,12 @@ On Linux, the equalizer, DSEE and one-click connect are coming soon.
 - **WF-1000XM4**
 - **LinkBuds S**
 
-Sound Connect shows only the settings your model has. Older models, such as the WH-1000XM4 and WH-1000XM3, aren't supported yet.
+**Bose**
+
+- **QuietComfort 35**
+- **QuietComfort 35 II**
+
+Sound Connect shows only the settings your model has. Older Sony models, such as the WH-1000XM4 and WH-1000XM3, aren't supported yet.
 
 ## First time
 
@@ -104,10 +112,10 @@ Sound Connect is free and open source, released under the [MIT License](LICENSE)
 
 Sound Connect talks directly to your headphones over Bluetooth. It doesn't need an account and doesn't send anything over the internet.
 
-## Not affiliated with Sony
+## Not affiliated with Sony or Bose
 
-Sound Connect is an independent project. It isn't made, endorsed or supported by Sony. Sony and the product names mentioned here are trademarks of their owners.
+Sound Connect is an independent project. It isn't made, endorsed or supported by Sony or Bose. Sony, Bose and the product names mentioned here are trademarks of their owners.
 
 ## Thanks
 
-Sound Connect builds on the work of open-source projects that figured out how Sony headphones communicate, especially [Gadgetbridge](https://gadgetbridge.org), [SonyHeadphonesClient](https://github.com/mos9527/SonyHeadphonesClient) and [Sony Device Center](https://github.com/marconvcm/sony-device-center).
+Sound Connect builds on the work of open-source projects that figured out how these headphones communicate, especially [Gadgetbridge](https://gadgetbridge.org), [SonyHeadphonesClient](https://github.com/mos9527/SonyHeadphonesClient) and [Sony Device Center](https://github.com/marconvcm/sony-device-center) for Sony, and [bosectl](https://github.com/alabalag1/bosectl) and [based-connect](https://github.com/Denton-L/based-connect) for Bose.

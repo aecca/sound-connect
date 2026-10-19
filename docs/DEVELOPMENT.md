@@ -1,13 +1,15 @@
 # How Sound Connect is built
 
-Sound Connect talks to Sony headphones over a Bluetooth serial channel (RFCOMM) using Sony's binary protocol, the same one their phone app uses. One shared core speaks the protocol; each platform has its own app around it.
+Sound Connect talks to headphones over a Bluetooth serial channel (RFCOMM) using each brand's own protocol, the same one their phone app uses. One shared core has a driver per brand; each platform has its own app around it, and neither the apps nor the Bluetooth code know which brand they're talking to.
 
 ## Layout
 
 | Path | What it is |
 | --- | --- |
-| `crates/protocol` | The protocol, with no I/O: message framing, typed commands, model profiles, and a `Session` that handles acknowledgements and retries. Tested against messages captured from a real WH-1000XM5. |
-| `crates/ffi` | Swift bindings for the protocol (UniFFI), used by the Mac app. |
+| `crates/core` | The protocols, with no I/O. `device.rs` is the brand-neutral model apps use (`Device`, `Update`, `Setting`); `driver.rs` the `Driver` contract; `registry.rs` picks a driver by the headset's control service. |
+| `crates/core/src/drivers/sony` | Sony: framing, commands, per-model profiles and the ACK-based session. Tested against messages captured from a real WH-1000XM5. |
+| `crates/core/src/drivers/bose` | Bose QuietComfort 35 and 35 II, over BMAP. |
+| `crates/ffi` | Swift bindings for the drivers (UniFFI), used by the Mac app. |
 | `macos/` | The native Mac app (Swift, AppKit menu, IOBluetooth). |
 | `crates/bluetooth` | Bluetooth link for the Rust app: BlueZ on Linux, IOBluetooth on macOS. |
 | `crates/app` | The Linux app (Rust, GPUI): a tray icon and a small panel. |
@@ -43,11 +45,20 @@ To build, test and lint for Linux from a Mac, see the comment at the top of `scr
 ## Tests
 
 ```sh
+cargo fmt --all --check
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
 The protocol tests use real messages. When adding support for a model or setting, capture what the headphones send (`SOUND_CONNECT_DEBUG=1` on the Mac app) and add it as a test.
+
+## Adding a brand
+
+1. Add `crates/core/src/drivers/<brand>/` with a type implementing `Driver`: it turns bytes into `Update`s and `Setting`s into bytes, and describes the headset as a `Device`.
+2. Add its control service UUID to `SERVICES` and a branch to `driver_for` in `registry.rs`.
+3. Add tests built from real messages.
+
+The Bluetooth code, the Mac menu and the Linux panel pick it up without changes: they show whatever the `Device` says the headset has.
 
 ## Releasing
 
@@ -60,6 +71,6 @@ git push origin v0.2.0
 
 Update `version` in `Cargo.toml` first. `install.sh` always installs the latest release.
 
-## Where the protocol comes from
+## Where the protocols come from
 
-The byte layouts come from [Gadgetbridge](https://codeberg.org/Freeyourgadget/Gadgetbridge) and [Sony Device Center](https://github.com/marconvcm/sony-device-center), and are checked against real headphones where possible. Comments in `crates/protocol` say which layouts haven't been tried on hardware yet.
+Sony's byte layouts come from [Gadgetbridge](https://codeberg.org/Freeyourgadget/Gadgetbridge) and [Sony Device Center](https://github.com/marconvcm/sony-device-center); Bose's from [bosectl](https://github.com/alabalag1/bosectl) and [based-connect](https://github.com/Denton-L/based-connect). They're checked against real headphones where possible, and comments in `crates/core` say which layouts haven't been tried on hardware yet.

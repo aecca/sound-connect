@@ -1,10 +1,13 @@
 //! What the app knows about the connected headset. The panel renders it and
-//! calls the setters, which update the UI right away and tell the headset.
+//! changes it through [`Headset::change`], which updates the UI right away
+//! and tells the headset.
 
+use std::collections::HashMap;
 use std::sync::mpsc;
 
 use gpui_kit::*;
-use sc_bluetooth::{Battery, Codec, Event, NoiseControl, Request, Update};
+use sc_bluetooth::Event;
+use sc_core::{AutoOff, Battery, Device, Feature, ListeningMode, Setting, Update};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Connection {
@@ -16,71 +19,80 @@ pub enum Connection {
 pub struct Headset {
     pub connection: Connection,
     pub name: Option<String>,
+    /// Which controls the headset has, once its driver knows.
+    pub device: Option<Device>,
     pub battery: Option<Battery>,
-    pub codec: Option<Codec>,
-    pub firmware: Option<String>,
-    pub noise: Option<NoiseControl>,
-    pub speak_to_chat: Option<bool>,
-    requests: mpsc::Sender<Request>,
+    pub codec: Option<String>,
+    pub mode: Option<ListeningMode>,
+    pub ambient_level: Option<u8>,
+    pub focus_on_voice: Option<bool>,
+    pub features: HashMap<Feature, bool>,
+    pub auto_off: Option<AutoOff>,
+    requests: mpsc::Sender<Setting>,
 }
 
 impl Headset {
-    pub fn new(requests: mpsc::Sender<Request>) -> Self {
+    pub fn new(requests: mpsc::Sender<Setting>) -> Self {
         Self {
             connection: Connection::Searching,
             name: None,
+            device: None,
             battery: None,
             codec: None,
-            firmware: None,
-            noise: None,
-            speak_to_chat: None,
+            mode: None,
+            ambient_level: None,
+            focus_on_voice: None,
+            features: HashMap::new(),
+            auto_off: None,
             requests,
         }
     }
 
     pub fn apply(&mut self, event: Event) {
         match event {
-            Event::Searching | Event::Disconnected => {
-                *self = Self::new(self.requests.clone());
-            }
+            Event::Searching | Event::Disconnected => *self = Self::new(self.requests.clone()),
             Event::Connected { name } => {
                 self.connection = Connection::Connected;
                 self.name = Some(name);
             }
             Event::Unsupported(reason) => self.connection = Connection::Unsupported(reason),
-            Event::Update(update) => match update {
-                Update::Ready { .. } => {}
-                Update::Firmware(version) => self.firmware = Some(version),
-                Update::Battery(battery) => self.battery = Some(battery),
-                Update::Codec(codec) => self.codec = Some(codec),
-                Update::NoiseControl(noise) => self.noise = Some(noise),
-                Update::SpeakToChat(on) => self.speak_to_chat = Some(on),
-                // Not shown in this panel yet.
-                Update::EarbudBattery { .. } | Update::CaseBattery(_) | Update::Equalizer(_) | Update::Dsee(_) => {}
-            },
+            Event::Update(update) => self.update(update),
         }
     }
 
-    pub fn set_noise(&mut self, noise: NoiseControl, cx: &mut Context<Self>) {
-        if self.noise == Some(noise) {
-            return;
+    fn update(&mut self, update: Update) {
+        match update {
+            Update::Device(device) => self.device = Some(device),
+            Update::Unsupported(reason) => self.connection = Connection::Unsupported(reason),
+            Update::Codec(codec) => self.codec = Some(codec),
+            Update::Battery(battery) => self.battery = Some(battery),
+            Update::Mode(mode) => self.mode = Some(mode),
+            Update::AmbientLevel(level) => self.ambient_level = Some(level),
+            Update::FocusOnVoice(on) => self.focus_on_voice = Some(on),
+            Update::Feature(feature, on) => {
+                self.features.insert(feature, on);
+            }
+            Update::AutoOff(auto_off) => self.auto_off = Some(auto_off),
+            // Not shown in this panel yet.
+            Update::Firmware(_) | Update::Earbuds { .. } | Update::CaseBattery(_) | Update::Equalizer(_) => {}
         }
-        self.noise = Some(noise);
-        let _ = self.requests.send(Request::SetNoiseControl(noise));
-        cx.notify();
     }
 
-    pub fn set_speak_to_chat(&mut self, on: bool, cx: &mut Context<Self>) {
-        self.speak_to_chat = Some(on);
-        let _ = self.requests.send(Request::SetSpeakToChat(on));
-        cx.notify();
-    }
-
-    /// Asks the headset for fresh values, e.g. when the panel opens.
-    pub fn refresh(&self) {
-        if self.connection == Connection::Connected {
-            let _ = self.requests.send(Request::Battery);
-            let _ = self.requests.send(Request::NoiseControl);
+    /// Applies a change the user made and sends it to the headset, unless
+    /// nothing actually changed (a slider reports every position).
+    pub fn change(&mut self, setting: Setting, cx: &mut Context<Self>) {
+        let changed = match setting {
+            Setting::Mode(mode) => self.mode.replace(mode) != Some(mode),
+            Setting::AmbientLevel(level) => self.ambient_level.replace(level) != Some(level),
+            Setting::FocusOnVoice(on) => self.focus_on_voice.replace(on) != Some(on),
+            Setting::Feature(feature, on) => self.features.insert(feature, on) != Some(on),
+            Setting::AutoOff(auto_off) => self.auto_off.replace(auto_off) != Some(auto_off),
+            // This panel has no equalizer; the change still goes through.
+            Setting::EqualizerPreset(_) | Setting::EqualizerBands(_) => true,
+        };
+        if changed {
+            let _ = self.requests.send(setting);
+            cx.notify();
         }
     }
 }

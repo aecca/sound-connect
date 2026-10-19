@@ -2,29 +2,36 @@ import Foundation
 import IOBluetooth
 import SoundConnectCore
 
-/// Keeps the control channel to the connected Sony headset open and runs the
-/// shared Rust protocol session over it. Everything happens on the main
-/// thread, where IOBluetooth delivers its callbacks.
+/// Keeps the control channel to a supported headset open and lets its
+/// driver, from the shared Rust core, speak over it. Everything happens on
+/// the main thread, where IOBluetooth delivers its callbacks.
 final class HeadsetLink: NSObject, IOBluetoothRFCOMMChannelDelegate {
     /// Wait between attempts to find the headset, growing while it keeps failing.
     private static let retryDelays: [TimeInterval] = [3, 5, 10, 30]
-    private static let serviceUUIDs: [IOBluetoothSDPUUID] = serviceUuids().compactMap(sdpUUID)
+    /// How long opening the channel may take before giving up on it, e.g.
+    /// because the headset turned off meanwhile and IOBluetooth never answers.
+    private static let openTimeout: TimeInterval = 15
+    /// Control services of supported headsets, in order of preference.
+    private static let services: [(name: String, uuid: IOBluetoothSDPUUID)] = serviceUuids().compactMap { name in
+        sdpUUID(name).map { (name, $0) }
+    }
 
     private let model: HeadsetModel
-    private var session = Session()
+    private var headset: Headset?
     private var channel: IOBluetoothRFCOMMChannel?
     private var channelOpen = false
     private var failures = 0
     /// The user asked to connect a headset and Bluetooth is still working on it.
     private var connectingManually = false
     private var retry: Timer?
+    private var openDeadline: Timer?
     private var timers: [Timer] = []
     private var connectNotification: IOBluetoothUserNotification?
 
     init(model: HeadsetModel) {
         self.model = model
         super.init()
-        model.send = { [weak self] request in self?.send(request) }
+        model.send = { [weak self] setting in self?.send(setting) }
         model.connect = { [weak self] name in self?.connect(name: name) }
         connectNotification = IOBluetoothDevice.register(
             forConnectNotifications: self, selector: #selector(deviceConnected(_:device:)))
@@ -38,14 +45,17 @@ final class HeadsetLink: NSObject, IOBluetoothRFCOMMChannelDelegate {
         guard channel == nil, !connectingManually else { return }
 
         let devices = (IOBluetoothDevice.pairedDevices() as? [IOBluetoothDevice]) ?? []
-        model.disconnectedHeadsets = devices.filter { !$0.isConnected() && Self.looksLikeSony($0) }.map(\.nameOrAddress)
+        model.disconnectedHeadsets = devices
+            .filter { !$0.isConnected() && Self.controlService(of: $0) != nil }
+            .map(\.nameOrAddress)
 
         for device in devices where device.isConnected() {
-            guard let record = Self.serviceUUIDs.lazy.compactMap({ device.getServiceRecord(for: $0) }).first else {
+            guard let (service, record) = Self.controlService(of: device) else {
                 // Service records aren't cached yet: ask the headset, then try again.
-                if Self.looksLikeSony(device) { device.performSDPQuery(self, uuids: Self.serviceUUIDs) }
+                if Self.isAudio(device) { device.performSDPQuery(self, uuids: Self.services.map(\.uuid)) }
                 continue
             }
+            guard let headset = headsetFor(name: device.nameOrAddress, service: service) else { continue }
             var channelID: BluetoothRFCOMMChannelID = 0
             guard record.getRFCOMMChannelID(&channelID) == kIOReturnSuccess else { continue }
 
@@ -53,7 +63,11 @@ final class HeadsetLink: NSObject, IOBluetoothRFCOMMChannelDelegate {
             let status = device.openRFCOMMChannelAsync(&opened, withChannelID: channelID, delegate: self)
             if status == kIOReturnSuccess, let opened {
                 channel = opened
+                self.headset = headset
                 model.reset(to: .connecting(name: device.nameOrAddress))
+                openDeadline = schedule(after: Self.openTimeout, repeats: false) { [weak self] in
+                    self?.openFailed(opened)
+                }
                 return
             }
             // IOBluetooth can hand back a channel even when opening fails;
@@ -72,7 +86,7 @@ final class HeadsetLink: NSObject, IOBluetoothRFCOMMChannelDelegate {
     }
 
     @objc private func deviceConnected(_ note: IOBluetoothUserNotification, device: IOBluetoothDevice) {
-        guard channel == nil, Self.looksLikeSony(device) else { return }
+        guard channel == nil, Self.isAudio(device) else { return }
         failures = 0
         // Give the headset a moment to finish setting up audio.
         scheduleAttempt(after: 1.5)
@@ -93,18 +107,18 @@ final class HeadsetLink: NSObject, IOBluetoothRFCOMMChannelDelegate {
         connectingManually = true
         model.notice = nil
         model.reset(to: .connecting(name: name))
-        if device.openConnection(self) != kIOReturnSuccess { connectionFailed(name: name) }
+        if device.openConnection(self) != kIOReturnSuccess { connectionFailed() }
     }
 
     @objc private func connectionComplete(_ device: IOBluetoothDevice, status: IOReturn) {
         connectingManually = false
-        guard status == kIOReturnSuccess else { return connectionFailed(name: device.nameOrAddress ?? "") }
+        guard status == kIOReturnSuccess else { return connectionFailed() }
         failures = 0
         // Give the headset a moment to finish setting up audio.
         scheduleAttempt(after: 1.5)
     }
 
-    private func connectionFailed(name: String) {
+    private func connectionFailed() {
         connectingManually = false
         model.reset(to: .searching)
         model.notice = "Couldn't connect. Are they on?"
@@ -114,45 +128,41 @@ final class HeadsetLink: NSObject, IOBluetoothRFCOMMChannelDelegate {
     // MARK: The control channel
 
     func rfcommChannelOpenComplete(_ rfcommChannel: IOBluetoothRFCOMMChannel!, status error: IOReturn) {
-        guard rfcommChannel === channel else { return }
-        guard error == kIOReturnSuccess else {
-            rfcommChannel.close()
-            channel = nil
-            model.reset(to: .searching)
-            scheduleAttempt(after: Self.retryDelays[min(failures, Self.retryDelays.count - 1)])
-            failures += 1
-            return
-        }
+        guard rfcommChannel === channel, let headset else { return }
+        openDeadline?.invalidate()
+        openDeadline = nil
+        guard error == kIOReturnSuccess else { return openFailed(rfcommChannel) }
 
         failures = 0
         channelOpen = true
         model.notice = nil
-        session = Session()
-        let profile = profileFor(name: model.name ?? "")
-        model.profile = profile
         if let name = model.name { model.connection = .connected(name: name) }
-        for request in initialRequests(profile: profile) { write(session.request(request: request)) }
+        handle(headset.start())
         timers = [
-            schedule(after: 0.25, repeats: true) { [weak self] in
-                guard let self else { return }
-                write(session.tick())
-            },
-            schedule(after: 60, repeats: true) { [weak self] in
-                batteryRequests(profile: profile).forEach { self?.send($0) }
-            },
+            schedule(after: 0.25, repeats: true) { [weak self] in self?.write(headset.tick()) },
+            schedule(after: 60, repeats: true) { [weak self] in self?.write(headset.refresh()) },
         ]
     }
 
+    private func openFailed(_ rfcommChannel: IOBluetoothRFCOMMChannel) {
+        guard rfcommChannel === channel, !channelOpen else { return }
+        rfcommChannel.close()
+        channel = nil
+        headset = nil
+        model.reset(to: .searching)
+        scheduleAttempt(after: Self.retryDelays[min(failures, Self.retryDelays.count - 1)])
+        failures += 1
+    }
+
     func rfcommChannelData(_ rfcommChannel: IOBluetoothRFCOMMChannel!, data dataPointer: UnsafeMutableRawPointer!, length dataLength: Int) {
-        guard rfcommChannel === channel else { return }
-        let output = session.receive(bytes: Data(bytes: dataPointer, count: dataLength))
-        write(output.writes)
-        output.updates.forEach(model.apply)
+        guard rfcommChannel === channel, let headset else { return }
+        handle(headset.receive(bytes: Data(bytes: dataPointer, count: dataLength)))
     }
 
     func rfcommChannelClosed(_ rfcommChannel: IOBluetoothRFCOMMChannel!) {
         guard rfcommChannel === channel else { return }
         channel = nil
+        headset = nil
         channelOpen = false
         timers.forEach { $0.invalidate() }
         timers = []
@@ -160,9 +170,14 @@ final class HeadsetLink: NSObject, IOBluetoothRFCOMMChannelDelegate {
         scheduleAttempt(after: 1)
     }
 
-    private func send(_ request: Request) {
-        guard channelOpen else { return }
-        write(session.request(request: request))
+    private func send(_ setting: Setting) {
+        guard channelOpen, let headset else { return }
+        write(headset.set(setting: setting))
+    }
+
+    private func handle(_ output: Output) {
+        write(output.writes)
+        output.updates.forEach(model.apply)
     }
 
     private func write(_ frames: [Data]) {
@@ -183,9 +198,14 @@ final class HeadsetLink: NSObject, IOBluetoothRFCOMMChannelDelegate {
         return timer
     }
 
-    private static func looksLikeSony(_ device: IOBluetoothDevice) -> Bool {
-        let name = device.nameOrAddress ?? ""
-        return ["WH-", "WF-", "WI-", "MDR-", "LinkBuds", "ULT"].contains { name.hasPrefix($0) }
+    /// The first supported control service the device offers, if macOS has
+    /// its service records.
+    private static func controlService(of device: IOBluetoothDevice) -> (String, IOBluetoothSDPServiceRecord)? {
+        services.lazy.compactMap { service in device.getServiceRecord(for: service.uuid).map { (service.name, $0) } }.first
+    }
+
+    private static func isAudio(_ device: IOBluetoothDevice) -> Bool {
+        device.deviceClassMajor == BluetoothDeviceClassMajor(kBluetoothDeviceClassMajorAudio)
     }
 
     private static func sdpUUID(_ string: String) -> IOBluetoothSDPUUID? {

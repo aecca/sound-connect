@@ -14,5 +14,5 @@ name = "uniffi-bindgen"
 path = "src/bin/uniffi-bindgen.rs"
 
 [dependencies]
-sc-protocol.workspace = true
+sc-core.workspace = true
 uniffi = { version = "0.32", features = ["cli"] }

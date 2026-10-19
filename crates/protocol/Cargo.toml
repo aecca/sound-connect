@@ -1,8 +1,0 @@
-[package]
-name = "sc-protocol"
-description = "Message framing and commands for Sony headphones"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
-
-[dependencies]

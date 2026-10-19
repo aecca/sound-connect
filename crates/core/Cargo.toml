@@ -1,0 +1,8 @@
+[package]
+name = "sc-core"
+description = "Headphone protocols for Sound Connect, one driver per brand, without I/O"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]

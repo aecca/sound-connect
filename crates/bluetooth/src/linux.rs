@@ -1,6 +1,6 @@
 //! Linux transport over BlueZ, through BlueR.
 //!
-//! BlueZ owns SDP and RFCOMM: we register a client profile for Sony's
+//! BlueZ owns SDP and RFCOMM: we register a client profile for the headset's
 //! control service, ask BlueZ to connect it, and BlueZ hands the connected
 //! socket to our profile. It all runs on a single-threaded Tokio runtime
 //! inside the Bluetooth thread.
@@ -12,32 +12,24 @@ use std::time::{Duration, Instant};
 use bluer::rfcomm::{Profile, ProfileHandle, ReqError, Role, Stream};
 use bluer::{Device, Uuid};
 use futures::{FutureExt, StreamExt};
-use sc_protocol::{Request, Session, Update};
+use sc_core::{Driver, Frame, Output, SERVICES, Setting, driver_for};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 use tokio::time;
 
-use crate::{Event, INITIAL_REQUESTS};
-
-/// Service UUIDs Sony headsets advertise for their control channel, newest first.
-const SONY_SERVICES: [Uuid; 2] = [
-    // v2: WH-1000XM5 and newer.
-    Uuid::from_u128(0x956c7b26_d49a_4ba8_b03f_b17d393cb6e2),
-    // v1: older headsets.
-    Uuid::from_u128(0x96cc203e_5068_46ad_b32d_e316f5e069ba),
-];
+use crate::Event;
 
 /// Wait between attempts to find the headset, growing while it keeps failing.
 const RETRY_CONNECT: [Duration; 4] =
     [Duration::from_secs(3), Duration::from_secs(5), Duration::from_secs(10), Duration::from_secs(30)];
-const REFRESH_BATTERY_EVERY: Duration = Duration::from_secs(60);
-/// How often the session may resend a request the headset didn't ACK.
+const REFRESH_EVERY: Duration = Duration::from_secs(60);
+/// How often the driver may resend a request the headset didn't answer.
 const TICK: Duration = Duration::from_millis(100);
 /// How long BlueZ gets to look up the channel and open it.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const DISCONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
-pub fn run(name_filter: Option<String>, requests: mpsc::Receiver<Request>, events: async_channel::Sender<Event>) {
+pub fn run(name_filter: Option<String>, requests: mpsc::Receiver<Setting>, events: async_channel::Sender<Event>) {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -45,8 +37,8 @@ pub fn run(name_filter: Option<String>, requests: mpsc::Receiver<Request>, event
     runtime.block_on(link(name_filter, forward(requests), events));
 }
 
-/// Moves requests from the UI onto a channel the runtime can await.
-fn forward(requests: mpsc::Receiver<Request>) -> UnboundedReceiver<Request> {
+/// Moves settings from the UI onto a channel the runtime can await.
+fn forward(requests: mpsc::Receiver<Setting>) -> UnboundedReceiver<Setting> {
     let (tx, rx) = unbounded_channel();
     std::thread::Builder::new()
         .name("bluetooth-requests".into())
@@ -63,9 +55,10 @@ fn forward(requests: mpsc::Receiver<Request>) -> UnboundedReceiver<Request> {
 
 async fn link(
     name_filter: Option<String>,
-    mut requests: UnboundedReceiver<Request>,
+    mut requests: UnboundedReceiver<Setting>,
     events: async_channel::Sender<Event>,
 ) {
+    let services = services();
     let mut bluez = None;
     let mut searching = false;
     let mut failures = 0;
@@ -77,7 +70,7 @@ async fn link(
                 .ok();
         }
         let channel = match &bluez {
-            Some(bluez) => connect(bluez, name_filter.as_deref()).await,
+            Some(bluez) => connect(bluez, &services, name_filter.as_deref()).await,
             None => None,
         };
         match channel {
@@ -85,7 +78,8 @@ async fn link(
                 searching = false;
                 failures = 0;
                 let _ = events.send(Event::Connected { name: channel.headset.name.clone() }).await;
-                let keep_going = serve(&mut channel.stream, &mut requests, &events).await;
+                let keep_going =
+                    serve(&mut channel.stream, channel.headset.driver.as_mut(), &mut requests, &events).await;
                 channel.close().await;
                 let _ = events.send(Event::Disconnected).await;
                 if !keep_going {
@@ -101,8 +95,8 @@ async fn link(
             }
         }
 
-        // Wait before looking again. Requests made meanwhile are dropped:
-        // the UI refreshes everything once a headset connects.
+        // Wait before looking again. Settings changed meanwhile are dropped:
+        // the UI reads everything again once a headset connects.
         let delay = RETRY_CONNECT[failures.min(RETRY_CONNECT.len() - 1)];
         let app_gone = time::timeout(delay, async { while requests.recv().await.is_some() {} }).await.is_ok();
         if app_gone || events.is_closed() {
@@ -115,14 +109,13 @@ async fn link(
 /// has gone away and the thread should stop.
 async fn serve(
     stream: &mut Stream,
-    requests: &mut UnboundedReceiver<Request>,
+    driver: &mut dyn Driver,
+    requests: &mut UnboundedReceiver<Setting>,
     events: &async_channel::Sender<Event>,
 ) -> bool {
-    let mut session = Session::default();
-    let now = Instant::now();
-    let mut frames: Vec<Vec<u8>> = INITIAL_REQUESTS.into_iter().flat_map(|r| session.request(r, now)).collect();
+    let mut frames = deliver(driver.start(Instant::now()), events).await;
     let mut tick = time::interval(TICK);
-    let mut battery = time::interval_at(time::Instant::now() + REFRESH_BATTERY_EVERY, REFRESH_BATTERY_EVERY);
+    let mut refresh = time::interval_at(time::Instant::now() + REFRESH_EVERY, REFRESH_EVERY);
     let mut buffer = [0; 1024];
 
     loop {
@@ -133,43 +126,52 @@ async fn serve(
             read = stream.read(&mut buffer) => {
                 // Zero bytes means the headset hung up.
                 let Ok(n @ 1..) = read else { return true };
-                let out = session.receive(&buffer[..n], Instant::now());
-                for update in out.updates {
-                    if update == (Update::Ready { v2: false }) {
-                        let _ = events.send(Event::Unsupported(
-                            "This headset uses an older protocol that isn't supported yet.".into(),
-                        )).await;
-                    }
-                    let _ = events.send(Event::Update(update)).await;
-                }
-                out.writes
+                deliver(driver.receive(&buffer[..n], Instant::now()), events).await
             }
-            request = requests.recv() => match request {
-                Some(request) => session.request(request, Instant::now()),
+            setting = requests.recv() => match setting {
+                Some(setting) => driver.set(setting, Instant::now()),
                 None => return false,
             },
-            _ = tick.tick() => session.tick(Instant::now()),
-            _ = battery.tick() => session.request(Request::Battery, Instant::now()),
+            _ = tick.tick() => driver.tick(Instant::now()),
+            _ = refresh.tick() => driver.refresh(Instant::now()),
         };
     }
 }
 
-async fn write(stream: &mut Stream, frames: Vec<Vec<u8>>) -> std::io::Result<()> {
+/// Passes the driver's updates on and returns the frames it wants written.
+async fn deliver(output: Output, events: &async_channel::Sender<Event>) -> Vec<Frame> {
+    for update in output.updates {
+        let _ = events.send(Event::Update(update)).await;
+    }
+    output.writes
+}
+
+async fn write(stream: &mut Stream, frames: Vec<Frame>) -> std::io::Result<()> {
     for frame in frames {
         stream.write_all(&frame).await?;
     }
     Ok(())
 }
 
-/// A paired, connected device that offers a Sony control service.
+/// The supported control services, newest first, as BlueZ names them.
+fn services() -> Vec<(&'static str, Uuid)> {
+    SERVICES.iter().filter_map(|&service| Some((service, Uuid::parse_str(service).ok()?))).collect()
+}
+
+/// A paired, connected device that offers a supported control service.
 struct Headset {
     device: Device,
     name: String,
     service: Uuid,
+    driver: Box<dyn Driver>,
 }
 
 impl Headset {
-    async fn check(device: Device, name_filter: Option<&str>) -> bluer::Result<Option<Self>> {
+    async fn check(
+        device: Device,
+        services: &[(&'static str, Uuid)],
+        name_filter: Option<&str>,
+    ) -> bluer::Result<Option<Self>> {
         if !device.is_paired().await? || !device.is_connected().await? {
             return Ok(None);
         }
@@ -178,8 +180,11 @@ impl Headset {
             return Ok(None);
         }
         let uuids = device.uuids().await?.unwrap_or_default();
-        let service = SONY_SERVICES.into_iter().find(|uuid| uuids.contains(uuid));
-        Ok(service.map(|service| Self { device, name, service }))
+        let Some(&(service_name, service)) = services.iter().find(|(_, uuid)| uuids.contains(uuid)) else {
+            return Ok(None);
+        };
+        let driver = driver_for(&name, service_name);
+        Ok(driver.map(|driver| Self { device, name, service, driver }))
     }
 
     /// Asks BlueZ to drop the profile connection, which closes its copy of
@@ -204,16 +209,21 @@ impl Channel {
     }
 }
 
-/// Finds a connected Sony headset and opens its control channel.
-async fn connect(bluez: &bluer::Session, name_filter: Option<&str>) -> Option<Channel> {
-    let headsets = headsets(bluez, name_filter).await;
+/// Finds a connected headset offering a supported service and opens its
+/// control channel.
+async fn connect(
+    bluez: &bluer::Session,
+    services: &[(&'static str, Uuid)],
+    name_filter: Option<&str>,
+) -> Option<Channel> {
+    let headsets = headsets(bluez, services, name_filter).await;
     if headsets.is_empty() {
         return None;
     }
-    let mut profiles = match register(bluez, &headsets).await {
+    let mut profiles = match register(bluez, services, &headsets).await {
         Ok(profiles) => profiles,
         Err(error) => {
-            eprintln!("bluetooth: can't register the Sony profile with BlueZ: {error}");
+            eprintln!("bluetooth: can't register the control profile with BlueZ: {error}");
             return None;
         }
     };
@@ -233,13 +243,17 @@ async fn connect(bluez: &bluer::Session, name_filter: Option<&str>) -> Option<Ch
     None
 }
 
-async fn headsets(bluez: &bluer::Session, name_filter: Option<&str>) -> Vec<Headset> {
+async fn headsets(
+    bluez: &bluer::Session,
+    services: &[(&'static str, Uuid)],
+    name_filter: Option<&str>,
+) -> Vec<Headset> {
     let mut found = Vec::new();
     for name in bluez.adapter_names().await.unwrap_or_default() {
         let Ok(adapter) = bluez.adapter(&name) else { continue };
         for address in adapter.device_addresses().await.unwrap_or_default() {
             let Ok(device) = adapter.device(address) else { continue };
-            if let Ok(Some(headset)) = Headset::check(device, name_filter).await {
+            if let Ok(Some(headset)) = Headset::check(device, services, name_filter).await {
                 found.push(headset);
             }
         }
@@ -249,9 +263,13 @@ async fn headsets(bluez: &bluer::Session, name_filter: Option<&str>) -> Vec<Head
 
 /// Registers a client profile for each service the headsets use. BlueZ
 /// looks up the RFCOMM channel and hands the socket over through it.
-async fn register(bluez: &bluer::Session, headsets: &[Headset]) -> bluer::Result<Vec<(Uuid, ProfileHandle)>> {
+async fn register(
+    bluez: &bluer::Session,
+    services: &[(&'static str, Uuid)],
+    headsets: &[Headset],
+) -> bluer::Result<Vec<(Uuid, ProfileHandle)>> {
     let mut profiles = Vec::new();
-    for uuid in SONY_SERVICES {
+    for &(_, uuid) in services {
         if !headsets.iter().any(|headset| headset.service == uuid) {
             continue;
         }

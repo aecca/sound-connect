@@ -5,9 +5,9 @@
 //! only hands data over through thread-safe state. The main run loop must be
 //! running: GPUI's is, and the probe example spins it by hand.
 
+use std::ffi::c_void;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::ffi::c_void;
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
@@ -17,37 +17,39 @@ use objc2::{AllocAnyThread, DefinedClass, define_class, msg_send};
 use objc2_foundation::{NSArray, NSDate, NSDefaultRunLoopMode, NSRunLoop};
 use objc2_io_bluetooth::{
     IOBluetoothDevice, IOBluetoothRFCOMMChannel, IOBluetoothRFCOMMChannelDelegate, IOBluetoothSDPUUID,
+    kBluetoothDeviceClassMajorAudio,
 };
-use sc_protocol::{Request, Session, Update};
+use sc_core::{Driver, Frame, Output, SERVICES, Setting, driver_for};
 
-use crate::{Event, INITIAL_REQUESTS};
-
-/// Service UUIDs Sony headsets advertise for their control channel.
-const SONY_SERVICES: [[u8; 16]; 2] = [
-    // v2: WH-1000XM5 and newer.
-    [0x95, 0x6c, 0x7b, 0x26, 0xd4, 0x9a, 0x4b, 0xa8, 0xb0, 0x3f, 0xb1, 0x7d, 0x39, 0x3c, 0xb6, 0xe2],
-    // v1: older headsets.
-    [0x96, 0xcc, 0x20, 0x3e, 0x50, 0x68, 0x46, 0xad, 0xb3, 0x2d, 0xe3, 0x16, 0xf5, 0xe0, 0x69, 0xba],
-];
+use crate::Event;
 
 /// Wait between attempts to find the headset, growing while it keeps failing.
 const RETRY_CONNECT: [Duration; 4] =
     [Duration::from_secs(3), Duration::from_secs(5), Duration::from_secs(10), Duration::from_secs(30)];
-const REFRESH_BATTERY_EVERY: Duration = Duration::from_secs(60);
+const REFRESH_EVERY: Duration = Duration::from_secs(60);
 const POLL: Duration = Duration::from_millis(20);
+const SDP_TIMEOUT: Duration = Duration::from_secs(5);
 
-pub fn run(name_filter: Option<String>, requests: mpsc::Receiver<Request>, events: async_channel::Sender<Event>) {
+/// An open control channel and the driver that speaks over it.
+struct Connection {
+    name: String,
+    channel: Retained<IOBluetoothRFCOMMChannel>,
+    driver: Box<dyn Driver>,
+}
+
+pub fn run(name_filter: Option<String>, requests: mpsc::Receiver<Setting>, events: async_channel::Sender<Event>) {
     let delegate = Delegate::new();
+    let services = services();
     let mut searching = false;
     let mut failures = 0;
     loop {
-        match connect(&delegate, name_filter.as_deref()) {
-            Some((name, channel)) => {
+        match connect(&delegate, &services, name_filter.as_deref()) {
+            Some(mut connection) => {
                 searching = false;
                 failures = 0;
-                let _ = events.send_blocking(Event::Connected { name });
-                let keep_going = serve(&delegate, &channel, &requests, &events);
-                unsafe { channel.closeChannel() };
+                let _ = events.send_blocking(Event::Connected { name: connection.name.clone() });
+                let keep_going = serve(&delegate, &mut connection, &requests, &events);
+                unsafe { connection.channel.closeChannel() };
                 let _ = events.send_blocking(Event::Disconnected);
                 if !keep_going {
                     return;
@@ -62,8 +64,8 @@ pub fn run(name_filter: Option<String>, requests: mpsc::Receiver<Request>, event
             }
         }
 
-        // Wait before looking again. Requests made meanwhile are dropped:
-        // the UI refreshes everything once a headset connects.
+        // Wait before looking again. Settings changed meanwhile are dropped:
+        // the UI reads everything again once a headset connects.
         let deadline = Instant::now() + RETRY_CONNECT[failures.min(RETRY_CONNECT.len() - 1)];
         while Instant::now() < deadline {
             match requests.recv_timeout(deadline - Instant::now()) {
@@ -81,16 +83,13 @@ pub fn run(name_filter: Option<String>, requests: mpsc::Receiver<Request>, event
 /// has gone away and the thread should stop.
 fn serve(
     delegate: &Delegate,
-    channel: &IOBluetoothRFCOMMChannel,
-    requests: &mpsc::Receiver<Request>,
+    connection: &mut Connection,
+    requests: &mpsc::Receiver<Setting>,
     events: &async_channel::Sender<Event>,
 ) -> bool {
-    let mut session = Session::default();
-    let now = Instant::now();
-    for request in INITIAL_REQUESTS {
-        write(channel, session.request(request, now));
-    }
-    let mut battery_checked = now;
+    let Connection { channel, driver, .. } = connection;
+    deliver(channel, events, driver.start(Instant::now()));
+    let mut refreshed = Instant::now();
 
     loop {
         spin_run_loop(POLL);
@@ -98,39 +97,37 @@ fn serve(
 
         let incoming = std::mem::take(&mut *delegate.ivars().incoming.lock().unwrap());
         if !incoming.is_empty() {
-            let out = session.receive(&incoming, now);
-            write(channel, out.writes);
-            for update in out.updates {
-                if update == (Update::Ready { v2: false }) {
-                    let _ = events.send_blocking(Event::Unsupported(
-                        "This headset uses an older protocol that isn't supported yet.".into(),
-                    ));
-                }
-                let _ = events.send_blocking(Event::Update(update));
-            }
+            deliver(channel, events, driver.receive(&incoming, now));
         }
         if delegate.ivars().closed.swap(false, Ordering::SeqCst) {
             return true;
         }
 
         match requests.recv_timeout(POLL) {
-            Ok(request) => write(channel, session.request(request, now)),
+            Ok(setting) => write(channel, driver.set(setting, now)),
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => return false,
         }
-        write(channel, session.tick(now));
+        write(channel, driver.tick(now));
 
-        if now.duration_since(battery_checked) >= REFRESH_BATTERY_EVERY {
-            battery_checked = now;
-            write(channel, session.request(Request::Battery, now));
+        if now.duration_since(refreshed) >= REFRESH_EVERY {
+            refreshed = now;
+            write(channel, driver.refresh(now));
         }
     }
 }
 
-fn write(channel: &IOBluetoothRFCOMMChannel, frames: Vec<Vec<u8>>) {
+fn deliver(channel: &IOBluetoothRFCOMMChannel, events: &async_channel::Sender<Event>, output: Output) {
+    write(channel, output.writes);
+    for update in output.updates {
+        let _ = events.send_blocking(Event::Update(update));
+    }
+}
+
+fn write(channel: &IOBluetoothRFCOMMChannel, frames: Vec<Frame>) {
     for mut frame in frames {
-        // Frames are tiny; the u16 length can't overflow.
-        unsafe { channel.writeSync_length(frame.as_mut_ptr().cast(), frame.len() as u16) };
+        let length = u16::try_from(frame.len()).expect("control frames are a few bytes long");
+        unsafe { channel.writeSync_length(frame.as_mut_ptr().cast(), length) };
     }
 }
 
@@ -139,34 +136,44 @@ fn spin_run_loop(limit: Duration) {
     unsafe { NSRunLoop::currentRunLoop().runMode_beforeDate(NSDefaultRunLoopMode, &until) };
 }
 
-/// Finds a connected Sony headset and opens its control channel.
-fn connect(delegate: &Delegate, name_filter: Option<&str>) -> Option<(String, Retained<IOBluetoothRFCOMMChannel>)> {
-    let uuids: Vec<Retained<IOBluetoothSDPUUID>> = SONY_SERVICES
+/// The supported control services, as IOBluetooth wants them.
+fn services() -> Vec<(&'static str, Retained<IOBluetoothSDPUUID>)> {
+    SERVICES
         .iter()
-        .filter_map(|bytes| unsafe { IOBluetoothSDPUUID::uuidWithBytes_length(bytes.as_ptr().cast(), 16) })
-        .collect();
+        .filter_map(|&service| {
+            let bytes = uuid_bytes(service)?;
+            let uuid = unsafe { IOBluetoothSDPUUID::uuidWithBytes_length(bytes.as_ptr().cast(), 16) }?;
+            Some((service, uuid))
+        })
+        .collect()
+}
 
+/// Finds a connected headset offering a supported service and opens its
+/// control channel.
+fn connect(
+    delegate: &Delegate,
+    services: &[(&'static str, Retained<IOBluetoothSDPUUID>)],
+    name_filter: Option<&str>,
+) -> Option<Connection> {
     for device in connected_devices() {
         let name = unsafe { device.name() }.to_string();
         if name_filter.is_some_and(|filter| !name.contains(filter)) {
             continue;
         }
 
-        let mut record = uuids.iter().find_map(|uuid| unsafe { device.getServiceRecordForUUID(Some(uuid)) });
-        if record.is_none() && looks_like_sony(&name) {
+        let find_record = || {
+            services.iter().find_map(|(service, uuid)| {
+                unsafe { device.getServiceRecordForUUID(Some(uuid)) }.map(|record| (*service, record))
+            })
+        };
+        let mut found = find_record();
+        if found.is_none() && unsafe { device.deviceClassMajor() } == kBluetoothDeviceClassMajorAudio {
             // Service records aren't cached yet: ask the headset.
-            delegate.ivars().sdp_done.store(false, Ordering::SeqCst);
-            let any_uuids: Vec<Retained<AnyObject>> =
-                uuids.iter().map(|u| unsafe { Retained::cast_unchecked(u.clone()) }).collect();
-            let array = NSArray::from_retained_slice(&any_uuids);
-            unsafe { device.performSDPQuery_uuids(Some(delegate), Some(&array)) };
-            let deadline = Instant::now() + Duration::from_secs(5);
-            while !delegate.ivars().sdp_done.load(Ordering::SeqCst) && Instant::now() < deadline {
-                spin_run_loop(POLL);
-            }
-            record = uuids.iter().find_map(|uuid| unsafe { device.getServiceRecordForUUID(Some(uuid)) });
+            query_services(delegate, &device, services);
+            found = find_record();
         }
-        let Some(record) = record else { continue };
+        let Some((service, record)) = found else { continue };
+        let Some(driver) = driver_for(&name, service) else { continue };
 
         let mut channel_id = 0;
         if unsafe { record.getRFCOMMChannelID(&mut channel_id) } != 0 {
@@ -176,10 +183,11 @@ fn connect(delegate: &Delegate, name_filter: Option<&str>) -> Option<(String, Re
         delegate.ivars().closed.store(false, Ordering::SeqCst);
         delegate.ivars().incoming.lock().unwrap().clear();
         let mut channel = None;
-        let status =
-            unsafe { device.openRFCOMMChannelSync_withChannelID_delegate(Some(&mut channel), channel_id, Some(delegate)) };
+        let status = unsafe {
+            device.openRFCOMMChannelSync_withChannelID_delegate(Some(&mut channel), channel_id, Some(delegate))
+        };
         match channel {
-            Some(channel) if status == 0 => return Some((name, channel)),
+            Some(channel) if status == 0 => return Some(Connection { name, channel, driver }),
             // IOBluetooth can hand back a channel even when opening fails;
             // close it or every failed attempt leaks a file descriptor.
             Some(channel) => unsafe {
@@ -189,6 +197,22 @@ fn connect(delegate: &Delegate, name_filter: Option<&str>) -> Option<(String, Re
         }
     }
     None
+}
+
+fn query_services(
+    delegate: &Delegate,
+    device: &IOBluetoothDevice,
+    services: &[(&'static str, Retained<IOBluetoothSDPUUID>)],
+) {
+    delegate.ivars().sdp_done.store(false, Ordering::SeqCst);
+    let uuids: Vec<Retained<AnyObject>> =
+        services.iter().map(|(_, uuid)| unsafe { Retained::cast_unchecked(uuid.clone()) }).collect();
+    let array = NSArray::from_retained_slice(&uuids);
+    unsafe { device.performSDPQuery_uuids(Some(delegate), Some(&array)) };
+    let deadline = Instant::now() + SDP_TIMEOUT;
+    while !delegate.ivars().sdp_done.load(Ordering::SeqCst) && Instant::now() < deadline {
+        spin_run_loop(POLL);
+    }
 }
 
 fn connected_devices() -> Vec<Retained<IOBluetoothDevice>> {
@@ -203,8 +227,17 @@ fn connected_devices() -> Vec<Retained<IOBluetoothDevice>> {
         .collect()
 }
 
-fn looks_like_sony(name: &str) -> bool {
-    ["WH-", "WF-", "WI-", "MDR-", "LinkBuds", "ULT"].iter().any(|prefix| name.starts_with(prefix))
+/// A UUID such as "956C7B26-D49A-4BA8-B03F-B17D393CB6E2" as its 16 bytes.
+fn uuid_bytes(uuid: &str) -> Option<[u8; 16]> {
+    let digits: Vec<u8> = uuid.bytes().filter(|&byte| byte != b'-').collect();
+    if digits.len() != 32 {
+        return None;
+    }
+    let mut bytes = [0; 16];
+    for (byte, pair) in bytes.iter_mut().zip(digits.chunks(2)) {
+        *byte = u8::from_str_radix(std::str::from_utf8(pair).ok()?, 16).ok()?;
+    }
+    Some(bytes)
 }
 
 #[derive(Default)]
@@ -252,5 +285,19 @@ impl Delegate {
     fn new() -> Retained<Self> {
         let this = Self::alloc().set_ivars(Ivars::default());
         unsafe { msg_send![super(this), init] }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_service_uuids() {
+        let bytes = uuid_bytes("956C7B26-D49A-4BA8-B03F-B17D393CB6E2").expect("valid UUID");
+        assert_eq!(bytes[..4], [0x95, 0x6c, 0x7b, 0x26]);
+        assert_eq!(bytes[12..], [0x39, 0x3c, 0xb6, 0xe2]);
+        assert!(uuid_bytes("not-a-uuid").is_none());
+        assert!(SERVICES.iter().all(|service| uuid_bytes(service).is_some()));
     }
 }

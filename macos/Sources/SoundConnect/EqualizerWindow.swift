@@ -67,7 +67,7 @@ private struct EqualizerView: View {
                         set: { value in
                             var bands = bands
                             bands[index] = Int8(value.rounded())
-                            model.setBands(.five(clearBass: clearBass, bands: bands))
+                            model.change(.equalizerBands(bands: .five(clearBass: clearBass, bands: bands)))
                         }
                     )
                 )
@@ -78,7 +78,7 @@ private struct EqualizerView: View {
                 range: -10...10,
                 value: Binding(
                     get: { Double(clearBass) },
-                    set: { model.setBands(.five(clearBass: Int8($0.rounded()), bands: bands)) }
+                    set: { model.change(.equalizerBands(bands: .five(clearBass: Int8($0.rounded()), bands: bands))) }
                 )
             )
         }
@@ -100,7 +100,7 @@ private struct EqualizerView: View {
                             set: { value in
                                 var bands = bands
                                 bands[index] = UInt8(value.rounded())
-                                model.setBands(.ten(bands: Data(bands)))
+                                model.change(.equalizerBands(bands: .ten(bands: Data(bands))))
                             }
                         )
                     )
@@ -113,7 +113,7 @@ private struct EqualizerView: View {
     }
 
     private func presetBinding(_ equalizer: Equalizer) -> Binding<EqPreset> {
-        Binding(get: { equalizer.preset }, set: { model.setPreset($0) })
+        Binding(get: { equalizer.preset }, set: { model.change(.equalizerPreset(preset: $0)) })
     }
 }
 

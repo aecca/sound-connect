@@ -1,24 +1,20 @@
-//! The small window that opens under the menu bar icon. Styled after the
-//! AirPods section of the macOS menu bar: system font, translucent
-//! background, circular icons and the system accent color.
+//! The small window that opens from the tray icon. Styled after the AirPods
+//! section of the macOS menu bar: system font, translucent background,
+//! circular icons and the system accent color. Which controls it shows comes
+//! from the headset's [`Device`], so it works for any brand.
 
+use gpui_kit::component::button::{Button, ButtonGroup};
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
 use gpui_kit::component::switch::Switch;
-use gpui_kit::component::{Disableable, Sizable, Theme, h_flex, v_flex};
+use gpui_kit::component::{Disableable, Selectable, Sizable, Theme, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use sc_bluetooth::{Battery, NoiseControl, NoiseMode};
+use sc_core::{AutoOff, Battery, Device, ListeningMode, Setting};
 
 use crate::headset::{Connection, Headset};
 
 pub const WIDTH: f32 = 300.;
-pub const HEIGHT: f32 = 392.;
-
-const MODES: [(NoiseMode, &str, &str); 3] = [
-    (NoiseMode::NoiseCancelling, "Noise Cancelling", "icons/ear-off.svg"),
-    (NoiseMode::Ambient, "Ambient Sound", "icons/ear.svg"),
-    (NoiseMode::Off, "Off", "icons/circle-off.svg"),
-];
+pub const HEIGHT: f32 = 460.;
 
 /// macOS system colors for the current appearance.
 #[derive(Clone, Copy)]
@@ -74,7 +70,7 @@ pub struct Panel {
 
 impl Panel {
     pub fn new(headset: Entity<Headset>, pinned: bool, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let level = headset.read(cx).noise.map_or(20., |n| n.ambient_level as f32);
+        let level = f32::from(headset.read(cx).ambient_level.unwrap_or(20));
         let ambient_level = cx.new(|_| SliderState::new().min(1.).max(20.).step(1.).default_value(level));
 
         let subscriptions = vec![
@@ -92,37 +88,36 @@ impl Panel {
             }),
             // Follow changes made on the headset itself, e.g. its NC button.
             cx.observe_in(&headset, window, |this, headset, window, cx| {
-                if let Some(noise) = headset.read(cx).noise {
-                    let level = noise.ambient_level as f32;
-                    if this.ambient_level.read(cx).value().start() != level {
-                        this.ambient_level.update(cx, |slider, cx| slider.set_value(level, window, cx));
-                    }
+                if let Some(level) = headset.read(cx).ambient_level.map(f32::from)
+                    && this.ambient_level.read(cx).value().start() != level
+                {
+                    this.ambient_level.update(cx, |slider, cx| slider.set_value(level, window, cx));
                 }
                 cx.notify();
             }),
             cx.subscribe_in(&ambient_level, window, |this, _, event: &SliderEvent, _, cx| {
                 let (SliderEvent::Change(value) | SliderEvent::Release(value)) = event;
-                let level = value.start().round() as u8;
-                this.headset.update(cx, |headset, cx| {
-                    if let Some(noise) = headset.noise {
-                        headset.set_noise(NoiseControl { ambient_level: level, ..noise }, cx);
-                    }
-                });
+                // The slider moves in whole steps from 1 to 20.
+                let level = value.start().round().clamp(1., 20.) as u8;
+                this.headset.update(cx, |headset, cx| headset.change(Setting::AmbientLevel(level), cx));
             }),
         ];
 
-        headset.read(cx).refresh();
         Self { headset, ambient_level, was_active: false, pinned, _subscriptions: subscriptions }
     }
 
     fn header(&self, p: Palette, cx: &App) -> impl IntoElement {
         let headset = self.headset.read(cx);
-        let title = headset.name.clone().unwrap_or_else(|| "Headphones".into());
+        let title = match (&headset.device, &headset.name) {
+            (Some(device), _) => format!("{} {}", device.brand.name(), device.model),
+            (None, Some(name)) => name.clone(),
+            (None, None) => "Headphones".into(),
+        };
         let status = match &headset.connection {
             Connection::Searching => "Not connected".to_owned(),
             Connection::Unsupported(_) => "Not supported".to_owned(),
-            Connection::Connected => match headset.codec {
-                Some(codec) => format!("Connected · {}", codec.name()),
+            Connection::Connected => match &headset.codec {
+                Some(codec) => format!("Connected · {codec}"),
                 None => "Connected".to_owned(),
             },
         };
@@ -141,68 +136,105 @@ impl Panel {
             .children(headset.battery.map(|battery| battery_indicator(battery, p)))
     }
 
-    fn noise_controls(&self, noise: NoiseControl, p: Palette) -> impl IntoElement {
-        let ambient = noise.mode == NoiseMode::Ambient;
-        let headset = self.headset.clone();
+    fn modes(&self, device: &Device, p: Palette, cx: &App) -> impl IntoElement {
+        let current = self.headset.read(cx).mode;
+        v_flex().gap_0p5().child(section_title("Noise Control", p)).children(device.modes.iter().map(|mode| {
+            let headset = self.headset.clone();
+            let selected = current == Some(mode.mode);
+            let setting = Setting::Mode(mode.mode);
+            h_flex()
+                .id(mode.name)
+                .px_2()
+                .py_1()
+                .gap_2p5()
+                .rounded(px(6.))
+                .cursor_pointer()
+                .hover(|style| style.bg(p.hover))
+                .child(icon_circle(
+                    mode_icon(mode.mode),
+                    26.,
+                    if selected { p.accent } else { p.fill },
+                    if selected { white() } else { p.label },
+                ))
+                .child(mode.name)
+                .on_click(move |_, _, cx| headset.update(cx, |headset, cx| headset.change(setting.clone(), cx)))
+        }))
+    }
+
+    /// Ambient options stay in place, dimmed outside ambient mode, so the
+    /// panel doesn't jump around.
+    fn ambient(&self, focus_on_voice: bool, p: Palette, cx: &App) -> impl IntoElement {
+        let headset = self.headset.read(cx);
+        let active = headset.mode == Some(ListeningMode::Ambient);
+        let level = headset.ambient_level.map(|level| level.to_string()).unwrap_or_default();
+        let focus = headset.focus_on_voice.unwrap_or(false);
+        let entity = self.headset.clone();
 
         v_flex()
-            .gap_0p5()
-            .child(section_title("Noise Control", p))
-            .children(MODES.iter().map(|&(mode, label, icon)| {
-                let headset = self.headset.clone();
-                let selected = noise.mode == mode;
-                h_flex()
-                    .id(label)
-                    .px_2()
-                    .py_1()
-                    .gap_2p5()
-                    .rounded(px(6.))
-                    .cursor_pointer()
-                    .hover(|style| style.bg(p.hover))
-                    .child(icon_circle(
-                        icon,
-                        26.,
-                        if selected { p.accent } else { p.fill },
-                        if selected { white() } else { p.label },
-                    ))
-                    .child(label)
-                    .on_click(move |_, _, cx| {
-                        headset.update(cx, |headset, cx| headset.set_noise(NoiseControl { mode, ..noise }, cx));
-                    })
-            }))
-            // Ambient options stay in place, dimmed, so the panel doesn't jump around.
+            .px_2()
+            .pt_1()
+            .gap_2()
+            .when(!active, |this| this.opacity(0.4))
             .child(
                 v_flex()
-                    .px_2()
-                    .pt_1()
-                    .gap_2()
-                    .when(!ambient, |this| this.opacity(0.4))
+                    .gap_1p5()
                     .child(
-                        v_flex()
-                            .gap_1p5()
-                            .child(
-                                h_flex()
-                                    .justify_between()
-                                    .text_size(px(12.))
-                                    .child("Ambient Sound Level")
-                                    .child(div().text_color(p.secondary).child(noise.ambient_level.to_string())),
-                            )
-                            .child(Slider::new(&self.ambient_level).disabled(!ambient)),
+                        h_flex()
+                            .justify_between()
+                            .text_size(px(12.))
+                            .child("Ambient Sound Level")
+                            .child(div().text_color(p.secondary).child(level)),
                     )
-                    .child(toggle_row(
-                        "focus-on-voice",
-                        "Focus on Voice",
-                        None,
-                        noise.focus_on_voice,
-                        !ambient,
-                        p,
-                        move |on, cx| {
-                            headset.update(cx, |headset, cx| {
-                                headset.set_noise(NoiseControl { focus_on_voice: on, ..noise }, cx)
-                            })
-                        },
-                    )),
+                    .child(Slider::new(&self.ambient_level).disabled(!active)),
             )
+            .when(focus_on_voice, |this| {
+                this.child(toggle_row("focus-on-voice", "Focus on Voice", None, focus, !active, p, move |on, cx| {
+                    entity.update(cx, |headset, cx| headset.change(Setting::FocusOnVoice(on), cx))
+                }))
+            })
+    }
+
+    fn features(&self, device: &Device, p: Palette, cx: &App) -> impl IntoElement {
+        let states = &self.headset.read(cx).features;
+        v_flex().children(device.features.iter().filter_map(|&feature| {
+            let on = *states.get(&feature)?;
+            let headset = self.headset.clone();
+            Some(toggle_row(
+                feature.name(),
+                feature.name(),
+                Some(feature.description()),
+                on,
+                false,
+                p,
+                move |on, cx| headset.update(cx, |headset, cx| headset.change(Setting::Feature(feature, on), cx)),
+            ))
+        }))
+    }
+
+    fn auto_off(&self, device: &Device, p: Palette, cx: &App) -> impl IntoElement {
+        let current = self.headset.read(cx).auto_off;
+        let choices = device.auto_off.clone();
+        let headset = self.headset.clone();
+        v_flex()
+            .px_2()
+            .py_1()
+            .gap_1p5()
+            .child("Turn Off When Unused")
+            .child(
+                ButtonGroup::new("auto-off")
+                    .outline()
+                    .xsmall()
+                    .w_full()
+                    .children(choices.iter().map(|&choice| {
+                        Button::new(choice.name()).label(short_name(choice)).flex_1().selected(current == Some(choice))
+                    }))
+                    .on_click(move |clicked, _, cx| {
+                        if let Some(&choice) = clicked.first().and_then(|&index| choices.get(index)) {
+                            headset.update(cx, |headset, cx| headset.change(Setting::AutoOff(choice), cx));
+                        }
+                    }),
+            )
+            .text_color(p.label)
     }
 
     fn message(title: &str, body: &str, p: Palette) -> impl IntoElement {
@@ -216,46 +248,34 @@ impl Panel {
             .child(div().font_weight(FontWeight::MEDIUM).child(title.to_owned()))
             .child(div().text_size(px(11.)).text_color(p.secondary).child(body.to_owned()))
     }
+
+    fn controls(&self, device: &Device, p: Palette, cx: &App) -> AnyElement {
+        v_flex()
+            .id("controls")
+            .flex_1()
+            .overflow_y_scroll()
+            .when(!device.modes.is_empty(), |this| this.child(self.modes(device, p, cx)))
+            .when_some(device.ambient.as_ref(), |this, ambient| this.child(self.ambient(ambient.focus_on_voice, p, cx)))
+            .when(!device.features.is_empty(), |this| this.child(separator(p)).child(self.features(device, p, cx)))
+            .when(!device.auto_off.is_empty(), |this| this.child(separator(p)).child(self.auto_off(device, p, cx)))
+            .into_any_element()
+    }
 }
 
 impl Render for Panel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = Palette::for_window(window);
         let headset = self.headset.read(cx);
-        let connection = headset.connection.clone();
-        let noise = headset.noise;
-        let speak_to_chat = headset.speak_to_chat;
-
-        let body = match (connection, noise) {
-            (Connection::Searching, _) => Self::message(
-                "Looking for your headphones",
-                "Make sure they're on and connected to this computer.",
-                p,
-            )
-            .into_any_element(),
-            (Connection::Unsupported(reason), _) => {
-                Self::message("These headphones aren't supported yet", &reason, p).into_any_element()
-            }
-            (Connection::Connected, None) => Self::message("Connecting…", "", p).into_any_element(),
-            (Connection::Connected, Some(noise)) => {
-                let headset = self.headset.clone();
-                v_flex()
-                    .flex_1()
-                    .child(self.noise_controls(noise, p))
-                    .child(separator(p))
-                    .children(speak_to_chat.map(|on| {
-                        toggle_row(
-                            "speak-to-chat",
-                            "Speak-to-Chat",
-                            Some("Switches to ambient sound when you talk"),
-                            on,
-                            false,
-                            p,
-                            move |on, cx| headset.update(cx, |headset, cx| headset.set_speak_to_chat(on, cx)),
-                        )
-                    }))
+        let body = match (&headset.connection, &headset.device) {
+            (Connection::Searching, _) => {
+                Self::message("Looking for your headphones", "Make sure they're on and connected to this computer.", p)
                     .into_any_element()
             }
+            (Connection::Unsupported(reason), _) => {
+                Self::message("These headphones aren't supported yet", reason, p).into_any_element()
+            }
+            (Connection::Connected, None) => Self::message("Connecting…", "", p).into_any_element(),
+            (Connection::Connected, Some(device)) => self.controls(&device.clone(), p, cx),
         };
 
         v_flex()
@@ -291,6 +311,25 @@ impl Render for Panel {
     }
 }
 
+fn mode_icon(mode: ListeningMode) -> &'static str {
+    match mode {
+        ListeningMode::NoiseCancelling | ListeningMode::NoiseCancellingLow | ListeningMode::WindReduction => {
+            "icons/ear-off.svg"
+        }
+        ListeningMode::Ambient => "icons/ear.svg",
+        ListeningMode::Off => "icons/circle-off.svg",
+    }
+}
+
+/// Auto-off choices short enough to sit side by side.
+fn short_name(auto_off: AutoOff) -> String {
+    match auto_off {
+        AutoOff::Never => "Never".into(),
+        AutoOff::Minutes(minutes) if minutes % 60 == 0 => format!("{}h", minutes / 60),
+        AutoOff::Minutes(minutes) => format!("{minutes}m"),
+    }
+}
+
 fn icon_circle(path: &'static str, diameter: f32, background: Hsla, color: Hsla) -> impl IntoElement {
     div()
         .flex_none()
@@ -320,7 +359,7 @@ fn separator(p: Palette) -> impl IntoElement {
 
 /// A battery drawn like the one in the macOS menu bar.
 fn battery_indicator(battery: Battery, p: Palette) -> impl IntoElement {
-    let level = battery.level.min(100) as f32 / 100.;
+    let level = f32::from(battery.level.min(100)) / 100.;
     let fill = if battery.charging {
         p.green
     } else if battery.level <= 20 {
@@ -366,7 +405,7 @@ fn toggle_row(
         .child(
             v_flex()
                 .child(label)
-                .children(caption.map(|c| div().text_size(px(11.)).text_color(p.secondary).child(c))),
+                .children(caption.map(|caption| div().text_size(px(11.)).text_color(p.secondary).child(caption))),
         )
         .child(
             Switch::new(id)

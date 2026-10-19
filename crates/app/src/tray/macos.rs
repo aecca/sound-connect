@@ -23,8 +23,9 @@ impl Tray {
             .expect("failed to add the menu bar icon");
 
         TrayIconEvent::set_event_handler(Some(move |event| {
-            if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Down, rect, .. } =
-                event
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left, button_state: MouseButtonState::Down, rect, ..
+            } = event
             {
                 let _ = clicks.send_blocking(rect);
             }

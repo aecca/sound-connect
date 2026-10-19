@@ -30,7 +30,7 @@ install -Dm644 /dev/stdin "$root/share/applications/sound-connect.desktop" <<EOF
 [Desktop Entry]
 Type=Application
 Name=Sound Connect
-Comment=Control your Sony headphones
+Comment=Control your Sony and Bose headphones
 Exec=sound-connect
 Icon=sound-connect
 Categories=AudioVideo;Audio;Settings;

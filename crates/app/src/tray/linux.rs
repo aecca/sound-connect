@@ -161,7 +161,8 @@ mod tests {
     // Not a glob import: GPUI's own `test` attribute would shadow the built-in one.
     use gpui_kit::{Bounds, Pixels, point, px, size};
 
-    use super::place;
+    use super::{MARGIN, place};
+    use crate::panel::HEIGHT;
 
     fn screen(x: f32, y: f32) -> Bounds<Pixels> {
         Bounds::new(point(px(x), px(y)), size(px(1920.), px(1080.)))
@@ -179,13 +180,18 @@ mod tests {
         assert_eq!(place(Some(point(px(1000.), px(12.))), screen(0., 0.)), point(px(850.), px(20.)));
     }
 
+    /// Where the panel's top goes so its bottom sits just above a click at `y`.
+    fn above(y: f32) -> f32 {
+        y - HEIGHT - MARGIN
+    }
+
     #[test]
     fn rises_above_a_bottom_panel() {
-        assert_eq!(place(Some(point(px(40.), px(1060.))), screen(0., 0.)), point(px(8.), px(660.)));
+        assert_eq!(place(Some(point(px(40.), px(1060.))), screen(0., 0.)), point(px(8.), px(above(1060.))));
     }
 
     #[test]
     fn stays_on_the_clicked_screen() {
-        assert_eq!(place(Some(point(px(1960.), px(1060.))), screen(1920., 0.)), point(px(1928.), px(660.)));
+        assert_eq!(place(Some(point(px(1960.), px(1060.))), screen(1920., 0.)), point(px(1928.), px(above(1060.))));
     }
 }

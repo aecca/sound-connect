@@ -2,15 +2,16 @@ import Foundation
 import Observation
 import SoundConnectCore
 
-/// What the app knows about the headset. The menu reads it; its setters
-/// update it right away and ask the link to tell the headset.
+/// What the app knows about the headset, whatever its brand. The menu reads
+/// it; `change(_:)` updates it right away and asks the link to tell the
+/// headset.
 @Observable
 final class HeadsetModel {
     enum Connection: Equatable {
         case searching
         case connecting(name: String)
         case connected(name: String)
-        case unsupported(name: String)
+        case unsupported(name: String, reason: String)
     }
 
     /// Print protocol updates; set SOUND_CONNECT_DEBUG to turn on.
@@ -19,8 +20,8 @@ final class HeadsetModel {
     var connection = Connection.searching {
         didSet { if Self.debug, connection != oldValue { print("connection:", connection) } }
     }
-    /// What the connected model supports; set by the link when it connects.
-    var profile: Profile?
+    /// Which controls the headset has, once its driver knows.
+    var device: Device?
     var battery: Battery?
     /// Earbuds report each side and the case instead of `battery`.
     var leftBattery: Battery?
@@ -28,108 +29,97 @@ final class HeadsetModel {
     var caseBattery: Battery?
     var codec: String?
     var firmware: String?
-    var noise: NoiseControl?
-    var speakToChat: Bool?
+    var mode: ListeningMode?
+    var ambientLevel: UInt8?
+    var focusOnVoice: Bool?
+    var features: [Feature: Bool] = [:]
+    var autoOff: AutoOff?
     var equalizer: Equalizer?
-    var dsee: Bool?
-    /// Sony headsets paired with this Mac but not connected right now.
+    /// Supported headsets paired with this Mac but not connected right now.
     var disconnectedHeadsets: [String] = []
     /// A problem to show while not connected, e.g. a failed connection.
     var notice: String?
 
-    /// Set by the link: sends a request to the headset.
-    @ObservationIgnored var send: (Request) -> Void = { _ in }
+    /// Set by the link: sends a change to the headset.
+    @ObservationIgnored var send: (Setting) -> Void = { _ in }
     /// Set by the link: connects a paired headset by name.
     @ObservationIgnored var connect: (String) -> Void = { _ in }
 
     var name: String? {
         switch connection {
         case .searching: nil
-        case .connecting(let name), .connected(let name), .unsupported(let name): name
+        case .connecting(let name), .connected(let name), .unsupported(let name, _): name
         }
     }
 
     func apply(_ update: Update) {
         if Self.debug { print("update:", update) }
         switch update {
-        case .ready(let v2):
-            if !v2, let name { connection = .unsupported(name: name) }
+        case .device(let device): self.device = device
+        case .unsupported(let reason):
+            if let name { connection = .unsupported(name: name, reason: reason) }
         case .firmware(let version): firmware = version
+        case .codec(let name): codec = name
         case .battery(let value): battery = value
-        case .earbudBattery(let left, let right):
+        case .earbuds(let left, let right):
             leftBattery = left
             rightBattery = right
         case .caseBattery(let value): caseBattery = value
-        case .codec(let name): codec = name
-        case .noiseControl(let value): noise = value
-        case .speakToChat(let on): speakToChat = on
+        case .mode(let mode): self.mode = mode
+        case .ambientLevel(let level): ambientLevel = level
+        case .focusOnVoice(let on): focusOnVoice = on
+        case .feature(let feature, let on): features[feature] = on
+        case .autoOff(let value): autoOff = value
         case .equalizer(let value): equalizer = value
-        case .dsee(let on): dsee = on
         }
     }
 
     /// Forgets the headset's state, e.g. after it disconnects.
     func reset(to connection: Connection) {
         self.connection = connection
-        profile = nil
+        device = nil
         battery = nil
         leftBattery = nil
         rightBattery = nil
         caseBattery = nil
         codec = nil
         firmware = nil
-        noise = nil
-        speakToChat = nil
+        mode = nil
+        ambientLevel = nil
+        focusOnVoice = nil
+        features = [:]
+        autoOff = nil
         equalizer = nil
-        dsee = nil
     }
 
-    func setMode(_ mode: NoiseMode) {
-        guard var noise else { return }
-        noise.mode = mode
-        setNoise(noise)
-    }
-
-    func setAmbientLevel(_ level: UInt8) {
-        guard var noise, noise.ambientLevel != level else { return }
-        noise.ambientLevel = level
-        setNoise(noise)
-    }
-
-    func setFocusOnVoice(_ on: Bool) {
-        guard var noise else { return }
-        noise.focusOnVoice = on
-        setNoise(noise)
-    }
-
-    func setSpeakToChat(_ on: Bool) {
-        speakToChat = on
-        send(.setSpeakToChat(on: on))
-    }
-
-    func setPreset(_ preset: EqPreset) {
-        guard var equalizer, let layout = profile?.equalizer, equalizer.preset != preset else { return }
-        equalizer.preset = preset
-        self.equalizer = equalizer
-        send(.setEqualizerPreset(layout: layout, preset: preset))
-    }
-
-    /// Changes the manual equalizer bands, which switches the preset to Manual.
-    func setBands(_ bands: EqBands) {
-        let equalizer = Equalizer(preset: .manual, bands: bands)
-        guard self.equalizer != nil, equalizer != self.equalizer else { return }
-        self.equalizer = equalizer
-        send(.setEqualizerBands(bands: bands))
-    }
-
-    func setDsee(_ on: Bool) {
-        dsee = on
-        send(.setDsee(on: on))
-    }
-
-    private func setNoise(_ value: NoiseControl) {
-        guard value != noise else { return }
-        noise = value
-        send(.setNoiseControl(value: value))
+    /// Applies a change the user made and sends it to the headset, unless
+    /// nothing actually changed (a slider reports every position).
+    func change(_ setting: Setting) {
+        switch setting {
+        case .mode(let mode):
+            guard self.mode != mode else { return }
+            self.mode = mode
+        case .ambientLevel(let level):
+            guard ambientLevel != level else { return }
+            ambientLevel = level
+        case .focusOnVoice(let on):
+            guard focusOnVoice != on else { return }
+            focusOnVoice = on
+        case .feature(let feature, let on):
+            guard features[feature] != on else { return }
+            features[feature] = on
+        case .autoOff(let value):
+            guard autoOff != value else { return }
+            autoOff = value
+        case .equalizerPreset(let preset):
+            guard var equalizer, equalizer.preset != preset else { return }
+            equalizer.preset = preset
+            self.equalizer = equalizer
+        case .equalizerBands(let bands):
+            let value = Equalizer(preset: .manual, bands: bands)
+            guard equalizer != nil, equalizer != value else { return }
+            equalizer = value
+        }
+        send(setting)
     }
 }

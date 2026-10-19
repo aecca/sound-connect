@@ -1,4 +1,4 @@
-//! Sound Connect: control Sony headphones from the menu bar.
+//! Sound Connect: control Sony and Bose headphones from the menu bar.
 
 mod assets;
 mod headset;
