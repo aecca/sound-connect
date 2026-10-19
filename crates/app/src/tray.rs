@@ -1,41 +1,39 @@
-//! The menu bar icon, and the panel it opens and closes.
+//! The tray icon, and the panel it opens and closes. The icon is platform
+//! code: the menu bar through `tray-icon` on macOS, a StatusNotifierItem
+//! through `ksni` on Linux.
 
 use std::time::{Duration, Instant};
 
 use gpui_kit::*;
-use tray_icon::{MouseButton, MouseButtonState, Rect, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
 use crate::headset::Headset;
 use crate::panel::{self, Panel};
+
+#[cfg(target_os = "linux")]
+mod linux;
+#[cfg(target_os = "linux")]
+use linux as platform;
+#[cfg(not(target_os = "linux"))]
+mod macos;
+#[cfg(not(target_os = "linux"))]
+use macos as platform;
 
 struct PanelWindow {
     handle: Option<AnyWindowHandle>,
     /// When the panel last closed because the user clicked elsewhere.
     dismissed_at: Option<Instant>,
-    tray: TrayIcon,
+    tray: platform::Tray,
 }
 
 impl Global for PanelWindow {}
 
 pub fn install(headset: Entity<Headset>, cx: &mut App) {
-    let tray = TrayIconBuilder::new()
-        .with_icon_templated(crate::icon::headphones())
-        .with_tooltip("Sound Connect")
-        .build()
-        .expect("failed to add the menu bar icon");
-    cx.set_global(PanelWindow { handle: None, dismissed_at: None, tray });
-
     let (clicks, clicked) = async_channel::unbounded();
-    TrayIconEvent::set_event_handler(Some(move |event| {
-        if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Down, rect, .. } =
-            event
-        {
-            let _ = clicks.send_blocking(rect);
-        }
-    }));
+    let tray = platform::Tray::new(clicks);
+    cx.set_global(PanelWindow { handle: None, dismissed_at: None, tray });
     cx.spawn(async move |cx| {
-        while let Ok(rect) = clicked.recv().await {
-            cx.update(|cx| toggle(rect, &headset, cx));
+        while let Ok(anchor) = clicked.recv().await {
+            cx.update(|cx| toggle(anchor, &headset, cx));
         }
     })
     .detach();
@@ -46,9 +44,9 @@ pub fn install(headset: Entity<Headset>, cx: &mut App) {
 pub fn open_now(headset: &Entity<Headset>, cx: &mut App) {
     let state = cx.global::<PanelWindow>();
     if state.handle.is_none()
-        && let Some(icon) = state.tray.rect()
+        && let Some(anchor) = state.tray.anchor()
     {
-        open(icon, headset.clone(), true, cx);
+        open(anchor, headset.clone(), true, cx);
     }
 }
 
@@ -60,7 +58,7 @@ pub fn dismiss(window: &mut Window, cx: &mut App) {
     window.remove_window();
 }
 
-fn toggle(icon: Rect, headset: &Entity<Headset>, cx: &mut App) {
+fn toggle(anchor: platform::Anchor, headset: &Entity<Headset>, cx: &mut App) {
     let state = cx.global::<PanelWindow>();
     if let Some(handle) = state.handle {
         let _ = handle.update(cx, |_, window, cx| dismiss(window, cx));
@@ -71,18 +69,24 @@ fn toggle(icon: Rect, headset: &Entity<Headset>, cx: &mut App) {
     if state.dismissed_at.is_some_and(|at| at.elapsed() < Duration::from_millis(300)) {
         return;
     }
-    open(icon, headset.clone(), false, cx);
+    open(anchor, headset.clone(), false, cx);
 }
 
-fn open(icon: Rect, headset: Entity<Headset>, pinned: bool, cx: &mut App) {
-    // The icon's position comes in physical pixels; windows use points.
-    let scale = screen_scale_factor();
-    let icon_center = (icon.position.x + icon.size.width as f64 / 2.) / scale;
-    let icon_bottom = (icon.position.y + icon.size.height as f64) / scale;
-    let origin = point(px((icon_center as f32 - panel::WIDTH / 2.).max(8.)), px(icon_bottom as f32 + 6.));
+fn open(anchor: platform::Anchor, headset: Entity<Headset>, pinned: bool, cx: &mut App) {
+    let origin = platform::panel_origin(anchor, cx);
+    let bounds = Bounds::new(origin, size(px(panel::WIDTH), px(panel::HEIGHT)));
+    cx.activate(true);
+    let build = |window: &mut Window, cx: &mut App| cx.new(|cx| Panel::new(headset.clone(), pinned, window, cx));
+    match platform::open_window(bounds, cx, build) {
+        Ok(handle) => cx.global_mut::<PanelWindow>().handle = Some(handle),
+        Err(error) => eprintln!("failed to open the panel: {error:#}"),
+    }
+}
 
-    let options = WindowOptions {
-        window_bounds: Some(WindowBounds::Windowed(Bounds::new(origin, size(px(panel::WIDTH), px(panel::HEIGHT))))),
+/// A borderless pop-up showing the panel at `bounds`.
+fn window_options(bounds: Bounds<Pixels>) -> WindowOptions {
+    WindowOptions {
+        window_bounds: Some(WindowBounds::Windowed(bounds)),
         titlebar: None,
         focus: true,
         show: true,
@@ -92,25 +96,5 @@ fn open(icon: Rect, headset: Entity<Headset>, pinned: bool, cx: &mut App) {
         is_minimizable: false,
         window_background: WindowBackgroundAppearance::Blurred,
         ..Default::default()
-    };
-    cx.activate(true);
-    match gpui_kit::open_window(options, cx, |window, cx| cx.new(|cx| Panel::new(headset, pinned, window, cx))) {
-        Ok((handle, _)) => cx.global_mut::<PanelWindow>().handle = Some(handle),
-        Err(error) => eprintln!("failed to open the panel: {error:#}"),
     }
-}
-
-#[cfg(target_os = "macos")]
-fn screen_scale_factor() -> f64 {
-    use objc2::MainThreadMarker;
-    use objc2_app_kit::NSScreen;
-
-    MainThreadMarker::new()
-        .and_then(|mtm| NSScreen::screens(mtm).firstObject())
-        .map_or(2., |screen| screen.backingScaleFactor())
-}
-
-#[cfg(not(target_os = "macos"))]
-fn screen_scale_factor() -> f64 {
-    1.
 }

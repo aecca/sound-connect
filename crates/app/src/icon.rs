@@ -1,11 +1,12 @@
-//! Draws the menu bar icon: a simple pair of headphones. It's a template
-//! image, so only the alpha channel matters and macOS picks the color.
+//! Draws the tray icon: a simple pair of headphones, as an alpha mask. The
+//! platform tray code turns it into an image.
 
-const SIZE: u32 = 36; // 18pt at 2x
+pub const SIZE: u32 = 36; // 18pt at 2x
 const SAMPLES: u32 = 4;
 
-pub fn headphones() -> tray_icon::Icon {
-    let mut rgba = Vec::with_capacity((SIZE * SIZE * 4) as usize);
+/// How much of each pixel the shape covers, from 0 to 255, row by row.
+pub fn headphones() -> Vec<u8> {
+    let mut alpha = Vec::with_capacity((SIZE * SIZE) as usize);
     for y in 0..SIZE {
         for x in 0..SIZE {
             let mut covered = 0;
@@ -16,11 +17,10 @@ pub fn headphones() -> tray_icon::Icon {
                     covered += inside(px, py) as u32;
                 }
             }
-            let alpha = (covered * 255 / (SAMPLES * SAMPLES)) as u8;
-            rgba.extend_from_slice(&[0, 0, 0, alpha]);
+            alpha.push((covered * 255 / (SAMPLES * SAMPLES)) as u8);
         }
     }
-    tray_icon::Icon::from_rgba(rgba, SIZE, SIZE).expect("icon has the right size")
+    alpha
 }
 
 fn inside(x: f32, y: f32) -> bool {

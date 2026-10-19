@@ -1,5 +1,6 @@
 //! Connects to the headset, prints what it reports and optionally changes
-//! the noise mode. Run it with `scripts/macos.sh probe [nc|ambient|off] [level]`.
+//! the noise mode. Run it with `scripts/macos.sh probe [nc|ambient|off] [level]`
+//! on macOS, or `cargo run -p sc-bluetooth --example probe -- [args]` on Linux.
 
 use std::time::{Duration, Instant};
 
@@ -20,8 +21,7 @@ fn main() {
     let mut sent = false;
 
     while Instant::now() < deadline {
-        // IOBluetooth delivers channel data on the main run loop.
-        spin_main_run_loop();
+        wait_a_moment();
         let event = match link.events.try_recv() {
             Ok(event) => event,
             Err(async_channel::TryRecvError::Empty) => continue,
@@ -48,8 +48,15 @@ fn main() {
     }
 }
 
-fn spin_main_run_loop() {
+/// IOBluetooth delivers channel data on the main run loop, so spin it.
+#[cfg(target_os = "macos")]
+fn wait_a_moment() {
     use objc2_foundation::{NSDate, NSDefaultRunLoopMode, NSRunLoop};
     let until = NSDate::dateWithTimeIntervalSinceNow(0.02);
     unsafe { NSRunLoop::mainRunLoop().runMode_beforeDate(NSDefaultRunLoopMode, &until) };
+}
+
+#[cfg(not(target_os = "macos"))]
+fn wait_a_moment() {
+    std::thread::sleep(Duration::from_millis(20));
 }
