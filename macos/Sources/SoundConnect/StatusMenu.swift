@@ -1,5 +1,6 @@
 import AppKit
 import Observation
+import ServiceManagement
 import SoundConnectCore
 import SwiftUI
 
@@ -30,6 +31,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     private var equalizerItem: NSMenuItem?
     private var presetItems: [(EqPreset, NSMenuItem)] = []
     private var dseeItem: NSMenuItem?
+    private var openAtLoginItem: NSMenuItem?
 
     private enum Layout: Equatable {
         case controls
@@ -149,10 +151,13 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         }
 
         menu.addItem(.separator())
+        openAtLoginItem = actionItem("Open at Login", #selector(toggleOpenAtLogin))
+        menu.addItem(openAtLoginItem!)
         menu.addItem(actionItem("Quit Sound Connect", #selector(quit), key: "q"))
     }
 
     private func update() {
+        openAtLoginItem?.state = SMAppService.mainApp.status == .enabled ? .on : .off
         guard let noise = model.noise else { return }
         let ambient = noise.mode == .ambient
         for (item, (mode, _, _)) in zip(modeItems, Self.modes) {
@@ -228,6 +233,11 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
     @objc private func connectHeadset(_ item: NSMenuItem) {
         if let name = item.representedObject as? String { model.connect(name) }
+    }
+
+    @objc private func toggleOpenAtLogin() {
+        LoginItem.set(SMAppService.mainApp.status != .enabled)
+        update()
     }
 
     @objc private func quit() {

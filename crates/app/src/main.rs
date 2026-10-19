@@ -12,6 +12,12 @@ use gpui_kit::component::Theme;
 use gpui_kit::*;
 
 fn main() {
+    // Lets installers check the app starts, without opening any windows.
+    if std::env::args().any(|arg| arg == "--version") {
+        println!("Sound Connect {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
+
     gpui_kit::application().with_assets(assets::Assets).run(|cx| {
         gpui_kit::init(cx);
         Theme::sync_system_appearance(None, cx);

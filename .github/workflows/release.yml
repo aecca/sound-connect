@@ -1,0 +1,56 @@
+# Builds Sound Connect for macOS and Linux and publishes a GitHub release
+# when a version tag is pushed (git tag v0.1.0 && git push origin v0.1.0).
+# install.sh downloads its files from the latest release.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - run: scripts/macos.sh package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: dist/SoundConnect-macos.zip
+
+  linux:
+    strategy:
+      matrix:
+        # Ubuntu 22.04's glibc keeps the binaries working on newer systems.
+        runner: [ubuntu-22.04, ubuntu-22.04-arm]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/linux-build-deps.sh
+      - uses: dtolnay/rust-toolchain@stable
+      - run: scripts/package-linux.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.runner }}
+          path: dist/sound-connect-linux-*.tar.gz
+
+  release:
+    needs: [macos, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      # Not marked as a pre-release: install.sh asks GitHub for the latest
+      # release, which skips pre-releases. The README says it's in beta.
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

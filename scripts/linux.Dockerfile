@@ -8,16 +8,8 @@
 # compiles and runs the tests: there's no Bluetooth or desktop in here.
 FROM rust:1.99-trixie
 
-# What GPUI (X11, Wayland, fonts, Vulkan) and BlueR (D-Bus) link against.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-      clang cmake pkg-config \
-      libdbus-1-dev \
-      libfontconfig-dev libfreetype-dev \
-      libvulkan-dev \
-      libwayland-dev \
-      libx11-xcb-dev libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev \
-      libssl-dev libzstd-dev libasound2-dev \
-    && rm -rf /var/lib/apt/lists/*
+COPY linux-build-deps.sh /tmp/
+RUN /tmp/linux-build-deps.sh && rm -rf /var/lib/apt/lists/*
 RUN rustup component add clippy
 
 # Docker Desktop's default 8 GB runs out compiling GPUI with a job per core.

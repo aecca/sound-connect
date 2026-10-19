@@ -7,7 +7,7 @@ Control your Sony headphones from your computer. No phone needed.
 
 ## What it does
 
-Sound Connect lives in your menu bar. Click the headphones icon to:
+Sound Connect sits in your menu bar (or your system tray on Linux). Click the headphones icon to:
 
 - Switch between **Noise cancelling**, **Ambient sound** and **Off**
 - Choose how much outside sound you hear, and turn on **Focus on voice**
@@ -17,26 +17,40 @@ Sound Connect lives in your menu bar. Click the headphones icon to:
 - Check your **battery level**
 - **Connect** your headphones with one click when they're paired but not connected
 
-If you change the mode with the button on your headphones, Sound Connect shows the change right away.
+If you change the mode with the button on your headphones, Sound Connect shows the change right away. On Linux, the equalizer, DSEE and one-click connect are coming soon.
 
-## Works with
+## Install
 
-**Tested and working:** Sony WH-1000XM5.
+Open a terminal, paste this line and press Enter:
 
-**Should work, but not tested yet:** WH-1000XM6, WF-1000XM4, WF-1000XM5, WF-1000XM6, WH-CH720N, ULT WEAR and LinkBuds S. If you have one of these, please [tell us how it goes](https://github.com/aecca/sound-connect/issues), even if everything works.
+```sh
+curl -fsSL https://raw.githubusercontent.com/aecca/sound-connect/main/install.sh | bash
+```
 
-**Not supported yet:** older models such as the WH-1000XM4 and WH-1000XM3.
+It works on **Mac**, **Ubuntu** and **Omarchy**, and on other Linux systems based on Debian or Arch. On Linux it may ask for your password to add a few system packages it needs.
 
-**Computers:** Mac. Linux support is on the way.
+Sound Connect then opens by itself, and again every time you log in.
+
+To remove it later:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/aecca/sound-connect/main/install.sh | bash -s -- --uninstall
+```
 
 ## Getting started
 
-1. Connect your headphones to your Mac in Bluetooth settings, as you normally would.
-2. Open Sound Connect. A headphones icon appears in your menu bar.
-3. The first time, your Mac asks whether Sound Connect can use Bluetooth. Click **Allow**.
+1. Connect your headphones to your computer in Bluetooth settings, as you normally would.
+2. Look for the headphones icon in your menu bar or system tray.
+3. On a Mac, the first time, you'll be asked whether Sound Connect can use Bluetooth. Click **Allow**.
 4. Click the icon to see and change your headphone settings.
 
-Ready-to-install downloads are coming soon.
+## Works with
+
+**Tested and working:** Sony WH-1000XM5 on a Mac.
+
+**Should work, but not tested yet:** WH-1000XM6, WF-1000XM4, WF-1000XM5, WF-1000XM6, WH-CH720N, ULT WEAR and LinkBuds S. Linux support is brand new too. If you try any of these, please [tell us how it goes](https://github.com/aecca/sound-connect/issues), even if everything works.
+
+**Not supported yet:** older models such as the WH-1000XM4 and WH-1000XM3.
 
 ## Free and open source
 

@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Sound Connect app icon: headphones with sound waves on a macOS-style squircle. -->
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5B7CFF"/>
+      <stop offset="1" stop-color="#6A3FE0"/>
+    </linearGradient>
+    <linearGradient id="shine" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.20"/>
+      <stop offset="0.55" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#background)"/>
+  <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#shine)"/>
+  <g transform="translate(0 -38)">
+    <g fill="none" stroke="#FFFFFF" stroke-linecap="round">
+      <path d="M 332 600 L 332 560 A 180 180 0 0 1 692 560 L 692 600" stroke-width="52"/>
+      <g opacity="0.5" stroke-width="26">
+        <path d="M 784 543 A 120 120 0 0 1 784 697"/>
+        <path d="M 826 508 A 175 175 0 0 1 826 732"/>
+        <path d="M 240 543 A 120 120 0 0 0 240 697"/>
+        <path d="M 198 508 A 175 175 0 0 0 198 732"/>
+      </g>
+    </g>
+    <g fill="#FFFFFF">
+      <rect x="276" y="520" width="112" height="210" rx="48"/>
+      <rect x="636" y="520" width="112" height="210" rx="48"/>
+    </g>
+  </g>
+</svg>
