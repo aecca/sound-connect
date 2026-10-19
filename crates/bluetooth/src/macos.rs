@@ -19,7 +19,7 @@ use objc2_io_bluetooth::{
     IOBluetoothDevice, IOBluetoothRFCOMMChannel, IOBluetoothRFCOMMChannelDelegate, IOBluetoothSDPUUID,
     kBluetoothDeviceClassMajorAudio,
 };
-use sc_core::{Driver, Frame, Output, SERVICES, Setting, driver_for};
+use sc_core::{Driver, Frame, Output, SERVICES, Setting, channel_service, driver_for};
 
 use crate::Event;
 
@@ -136,25 +136,42 @@ fn spin_run_loop(limit: Duration) {
     unsafe { NSRunLoop::currentRunLoop().runMode_beforeDate(NSDefaultRunLoopMode, &until) };
 }
 
+/// A supported control service and the service whose channel carries its protocol.
+struct Service {
+    name: &'static str,
+    uuid: Retained<IOBluetoothSDPUUID>,
+    /// `None` when the protocol is on this service's own channel.
+    channel: Option<Retained<IOBluetoothSDPUUID>>,
+}
+
+impl Service {
+    fn channel(&self) -> &IOBluetoothSDPUUID {
+        self.channel.as_deref().unwrap_or(&self.uuid)
+    }
+}
+
 /// The supported control services, as IOBluetooth wants them.
-fn services() -> Vec<(&'static str, Retained<IOBluetoothSDPUUID>)> {
+fn services() -> Vec<Service> {
     SERVICES
         .iter()
-        .filter_map(|&service| {
-            let bytes = uuid_bytes(service)?;
-            let uuid = unsafe { IOBluetoothSDPUUID::uuidWithBytes_length(bytes.as_ptr().cast(), 16) }?;
-            Some((service, uuid))
+        .filter_map(|&name| {
+            let channel = match channel_service(name) {
+                same if same == name => None,
+                other => Some(sdp_uuid(other)?),
+            };
+            Some(Service { name, uuid: sdp_uuid(name)?, channel })
         })
         .collect()
 }
 
+fn sdp_uuid(uuid: &str) -> Option<Retained<IOBluetoothSDPUUID>> {
+    let bytes = uuid_bytes(uuid)?;
+    unsafe { IOBluetoothSDPUUID::uuidWithBytes_length(bytes.as_ptr().cast(), 16) }
+}
+
 /// Finds a connected headset offering a supported service and opens its
 /// control channel.
-fn connect(
-    delegate: &Delegate,
-    services: &[(&'static str, Retained<IOBluetoothSDPUUID>)],
-    name_filter: Option<&str>,
-) -> Option<Connection> {
+fn connect(delegate: &Delegate, services: &[Service], name_filter: Option<&str>) -> Option<Connection> {
     for device in connected_devices() {
         let name = unsafe { device.name() }.to_string();
         if name_filter.is_some_and(|filter| !name.contains(filter)) {
@@ -162,8 +179,10 @@ fn connect(
         }
 
         let find_record = || {
-            services.iter().find_map(|(service, uuid)| {
-                unsafe { device.getServiceRecordForUUID(Some(uuid)) }.map(|record| (*service, record))
+            services.iter().find_map(|service| unsafe {
+                device.getServiceRecordForUUID(Some(&service.uuid))?;
+                // Some brands carry their protocol on another service's channel, like Bose on Serial Port.
+                device.getServiceRecordForUUID(Some(service.channel())).map(|record| (service, record))
             })
         };
         let mut found = find_record();
@@ -173,7 +192,7 @@ fn connect(
             found = find_record();
         }
         let Some((service, record)) = found else { continue };
-        let Some(driver) = driver_for(&name, service) else { continue };
+        let Some(driver) = driver_for(&name, service.name) else { continue };
 
         let mut channel_id = 0;
         if unsafe { record.getRFCOMMChannelID(&mut channel_id) } != 0 {
@@ -199,14 +218,14 @@ fn connect(
     None
 }
 
-fn query_services(
-    delegate: &Delegate,
-    device: &IOBluetoothDevice,
-    services: &[(&'static str, Retained<IOBluetoothSDPUUID>)],
-) {
+fn query_services(delegate: &Delegate, device: &IOBluetoothDevice, services: &[Service]) {
     delegate.ivars().sdp_done.store(false, Ordering::SeqCst);
-    let uuids: Vec<Retained<AnyObject>> =
-        services.iter().map(|(_, uuid)| unsafe { Retained::cast_unchecked(uuid.clone()) }).collect();
+    let uuids: Vec<Retained<AnyObject>> = services
+        .iter()
+        .flat_map(|service| [Some(&service.uuid), service.channel.as_ref()])
+        .flatten()
+        .map(|uuid| unsafe { Retained::cast_unchecked(uuid.clone()) })
+        .collect();
     let array = NSArray::from_retained_slice(&uuids);
     unsafe { device.performSDPQuery_uuids(Some(delegate), Some(&array)) };
     let deadline = Instant::now() + SDP_TIMEOUT;
@@ -299,5 +318,6 @@ mod tests {
         assert_eq!(bytes[12..], [0x39, 0x3c, 0xb6, 0xe2]);
         assert!(uuid_bytes("not-a-uuid").is_none());
         assert!(SERVICES.iter().all(|service| uuid_bytes(service).is_some()));
+        assert!(SERVICES.iter().all(|service| uuid_bytes(channel_service(service)).is_some()));
     }
 }

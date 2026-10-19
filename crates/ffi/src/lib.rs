@@ -2,8 +2,9 @@
 //! macOS app and the Rust apps share one implementation of every protocol.
 //!
 //! The Swift side owns the Bluetooth channel: it looks for one of the
-//! [`service_uuids`], gets a [`Headset`] for the device with [`headset_for`],
-//! passes it what the channel reads and writes out every frame it returns.
+//! [`service_uuids`], opens the channel of its [`channel_service`], gets a
+//! [`Headset`] for the device with [`headset_for`], passes it what the channel
+//! reads and writes out every frame it returns.
 
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -169,6 +170,12 @@ pub struct Headset(Mutex<Box<dyn Driver>>);
 #[uniffi::export]
 pub fn service_uuids() -> Vec<String> {
     sc_core::SERVICES.iter().map(|service| (*service).to_owned()).collect()
+}
+
+/// The service whose RFCOMM channel carries the protocol of a headset recognized by `service`.
+#[uniffi::export]
+pub fn channel_service(service: String) -> String {
+    sc_core::channel_service(&service).to_owned()
 }
 
 /// The headset with this Bluetooth name, given the control service it offers.
@@ -412,6 +419,8 @@ mod tests {
         let sony = headset_for("WH-1000XM5".into(), services[0].clone()).expect("Sony is supported");
         assert_eq!(sony.device().brand, Brand::Sony);
         assert!(headset_for("Speaker".into(), "0000110B-0000-1000-8000-00805F9B34FB".into()).is_none());
+        assert_eq!(channel_service(services[0].clone()), services[0]);
+        assert_eq!(channel_service(services[2].clone()), "00001101-0000-1000-8000-00805F9B34FB");
     }
 
     #[test]

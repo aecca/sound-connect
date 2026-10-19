@@ -15,6 +15,9 @@ final class HeadsetLink: NSObject, IOBluetoothRFCOMMChannelDelegate {
     private static let services: [(name: String, uuid: IOBluetoothSDPUUID)] = serviceUuids().compactMap { name in
         sdpUUID(name).map { (name, $0) }
     }
+    /// Every service whose record is needed: the control services and the ones carrying their protocol.
+    private static let queriedServices: [IOBluetoothSDPUUID] =
+        Set(serviceUuids().flatMap { [$0, channelService(service: $0)] }).compactMap(sdpUUID)
 
     private let model: HeadsetModel
     private var headset: Headset?
@@ -50,9 +53,12 @@ final class HeadsetLink: NSObject, IOBluetoothRFCOMMChannelDelegate {
             .map(\.nameOrAddress)
 
         for device in devices where device.isConnected() {
-            guard let (service, record) = Self.controlService(of: device) else {
+            // Some brands carry their protocol on another service's channel, like Bose on Serial Port.
+            guard let (service, _) = Self.controlService(of: device),
+                let record = Self.sdpUUID(channelService(service: service)).flatMap(device.getServiceRecord(for:))
+            else {
                 // Service records aren't cached yet: ask the headset, then try again.
-                if Self.isAudio(device) { device.performSDPQuery(self, uuids: Self.services.map(\.uuid)) }
+                if Self.isAudio(device) { device.performSDPQuery(self, uuids: Self.queriedServices) }
                 continue
             }
             guard let headset = headsetFor(name: device.nameOrAddress, service: service) else { continue }

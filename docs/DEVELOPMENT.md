@@ -6,7 +6,7 @@ Sound Connect talks to headphones over a Bluetooth serial channel (RFCOMM) using
 
 | Path | What it is |
 | --- | --- |
-| `crates/core` | The protocols, with no I/O. `device.rs` is the brand-neutral model apps use (`Device`, `Update`, `Setting`); `driver.rs` the `Driver` contract; `registry.rs` picks a driver by the headset's control service. |
+| `crates/core` | The protocols, with no I/O. `device.rs` is the brand-neutral model apps use (`Device`, `Update`, `Setting`); `driver.rs` the `Driver` contract; `registry.rs` picks a driver by the headset's control service, and the service whose channel to open. |
 | `crates/core/src/drivers/sony` | Sony: framing, commands, per-model profiles and the ACK-based session. Tested against messages captured from a real WH-1000XM5. |
 | `crates/core/src/drivers/bose` | Bose QuietComfort 35 and 35 II, over BMAP. |
 | `crates/ffi` | Swift bindings for the drivers (UniFFI), used by the Mac app. |
@@ -55,7 +55,7 @@ The protocol tests use real messages. When adding support for a model or setting
 ## Adding a brand
 
 1. Add `crates/core/src/drivers/<brand>/` with a type implementing `Driver`: it turns bytes into `Update`s and `Setting`s into bytes, and describes the headset as a `Device`.
-2. Add its control service UUID to `SERVICES` and a branch to `driver_for` in `registry.rs`.
+2. Add its control service UUID to `SERVICES` and a branch to `driver_for` in `registry.rs`. If its protocol runs on another service's channel (like Bose on Serial Port), add a branch to `channel_service` too.
 3. Add tests built from real messages.
 
 The Bluetooth code, the Mac menu and the Linux panel pick it up without changes: they show whatever the `Device` says the headset has.

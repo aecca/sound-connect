@@ -1,10 +1,11 @@
 //! Linux transport over BlueZ, through BlueR.
 //!
-//! BlueZ owns SDP and RFCOMM: we register a client profile for the headset's
-//! control service, ask BlueZ to connect it, and BlueZ hands the connected
-//! socket to our profile. It all runs on a single-threaded Tokio runtime
+//! BlueZ owns SDP and RFCOMM: we register a client profile for the service
+//! carrying the headset's protocol, ask BlueZ to connect it, and BlueZ hands
+//! the connected socket to our profile. It all runs on a single-threaded Tokio runtime
 //! inside the Bluetooth thread.
 
+use std::collections::HashSet;
 use std::error::Error;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -12,7 +13,7 @@ use std::time::{Duration, Instant};
 use bluer::rfcomm::{Profile, ProfileHandle, ReqError, Role, Stream};
 use bluer::{Device, Uuid};
 use futures::{FutureExt, StreamExt};
-use sc_core::{Driver, Frame, Output, SERVICES, Setting, driver_for};
+use sc_core::{Driver, Frame, Output, SERVICES, Setting, channel_service, driver_for};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 use tokio::time;
@@ -162,7 +163,8 @@ fn services() -> Vec<(&'static str, Uuid)> {
 struct Headset {
     device: Device,
     name: String,
-    service: Uuid,
+    /// The service whose channel carries its protocol.
+    channel: Uuid,
     driver: Box<dyn Driver>,
 }
 
@@ -180,18 +182,24 @@ impl Headset {
             return Ok(None);
         }
         let uuids = device.uuids().await?.unwrap_or_default();
-        let Some(&(service_name, service)) = services.iter().find(|(_, uuid)| uuids.contains(uuid)) else {
+        let Some(&(service_name, _)) = services.iter().find(|(_, uuid)| uuids.contains(uuid)) else {
             return Ok(None);
         };
+        let Some(channel) = channel_for(service_name, &uuids) else { return Ok(None) };
         let driver = driver_for(&name, service_name);
-        Ok(driver.map(|driver| Self { device, name, service, driver }))
+        Ok(driver.map(|driver| Self { device, name, channel, driver }))
     }
 
     /// Asks BlueZ to drop the profile connection, which closes its copy of
     /// the socket. Ours alone doesn't keep the channel open.
     async fn disconnect(&self) {
-        let _ = time::timeout(DISCONNECT_TIMEOUT, self.device.disconnect_profile(&self.service)).await;
+        let _ = time::timeout(DISCONNECT_TIMEOUT, self.device.disconnect_profile(&self.channel)).await;
     }
+}
+
+/// The service carrying the protocol of a headset recognized by `service`, if the headset offers it.
+fn channel_for(service: &str, offered: &HashSet<Uuid>) -> Option<Uuid> {
+    Uuid::parse_str(channel_service(service)).ok().filter(|channel| offered.contains(channel))
 }
 
 /// An open control channel, with the profiles that keep it open.
@@ -220,7 +228,7 @@ async fn connect(
     if headsets.is_empty() {
         return None;
     }
-    let mut profiles = match register(bluez, services, &headsets).await {
+    let mut profiles = match register(bluez, &headsets).await {
         Ok(profiles) => profiles,
         Err(error) => {
             eprintln!("bluetooth: can't register the control profile with BlueZ: {error}");
@@ -228,7 +236,7 @@ async fn connect(
         }
     };
     for headset in headsets {
-        let Some((_, profile)) = profiles.iter_mut().find(|(uuid, _)| *uuid == headset.service) else {
+        let Some((_, profile)) = profiles.iter_mut().find(|(uuid, _)| *uuid == headset.channel) else {
             continue;
         };
         match open(&headset, profile).await {
@@ -263,14 +271,11 @@ async fn headsets(
 
 /// Registers a client profile for each service the headsets use. BlueZ
 /// looks up the RFCOMM channel and hands the socket over through it.
-async fn register(
-    bluez: &bluer::Session,
-    services: &[(&'static str, Uuid)],
-    headsets: &[Headset],
-) -> bluer::Result<Vec<(Uuid, ProfileHandle)>> {
-    let mut profiles = Vec::new();
-    for &(_, uuid) in services {
-        if !headsets.iter().any(|headset| headset.service == uuid) {
+async fn register(bluez: &bluer::Session, headsets: &[Headset]) -> bluer::Result<Vec<(Uuid, ProfileHandle)>> {
+    let mut profiles: Vec<(Uuid, ProfileHandle)> = Vec::new();
+    for headset in headsets {
+        let uuid = headset.channel;
+        if profiles.iter().any(|(registered, _)| *registered == uuid) {
             continue;
         }
         let profile = Profile {
@@ -303,7 +308,25 @@ async fn open(headset: &Headset, profile: &mut ProfileHandle) -> Result<Stream, 
         }
         Err(bluer::Error { kind: bluer::ErrorKind::Failed, message: "the profile was unregistered".into() })
     };
-    let connect = headset.device.connect_profile(&headset.service);
+    let connect = headset.device.connect_profile(&headset.channel);
     let (_, stream) = time::timeout(CONNECT_TIMEOUT, async { tokio::try_join!(connect, accept) }).await??;
     Ok(stream)
+}
+
+#[cfg(test)]
+mod tests {
+    use sc_core::drivers::{bose, sony};
+
+    use super::*;
+
+    #[test]
+    fn opens_the_service_carrying_the_protocol() {
+        let uuid = |service: &str| Uuid::parse_str(service).expect("valid UUID");
+        let spp = uuid(bose::CHANNEL_SERVICE);
+        let offered = HashSet::from([uuid(sony::SERVICE), uuid(bose::SERVICE), spp]);
+        assert_eq!(channel_for(sony::SERVICE, &offered), Some(uuid(sony::SERVICE)));
+        assert_eq!(channel_for(bose::SERVICE, &offered), Some(spp));
+        // Bose's own channel never carries BMAP, so without Serial Port there's nothing to open.
+        assert_eq!(channel_for(bose::SERVICE, &HashSet::from([uuid(bose::SERVICE)])), None);
+    }
 }
