@@ -48,7 +48,7 @@ source_dir() {
   if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
     here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   fi
-  if [ -n "$here" ] && [ -f "$here/Cargo.toml" ] && [ -d "$here/crates/protocol" ]; then
+  if [ -n "$here" ] && [ -f "$here/Cargo.toml" ] && [ -d "$here/crates/core" ]; then
     echo "$here"
   else
     git clone --quiet --depth 1 "https://github.com/$REPO.git" "$TMP/src"
