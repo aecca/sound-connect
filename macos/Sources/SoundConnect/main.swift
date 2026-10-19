@@ -23,6 +23,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu = StatusMenu(model: model, updater: updater)
         updater.start()
     }
+
+    /// Opening the app again, e.g. from Spotlight, shows its menu: macOS
+    /// hides the icon when the menu bar is too full to fit it.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        menu?.show()
+        return false
+    }
 }
 
 /// Opening at login, like most menu bar utilities. It's on after the first

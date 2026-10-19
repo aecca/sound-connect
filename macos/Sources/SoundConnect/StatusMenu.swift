@@ -53,6 +53,17 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         menu.cancelTracking()
     }
 
+    /// Opens the menu under its icon or, when macOS hides the icon, where the
+    /// mouse is.
+    func show() {
+        NSApp.activate()
+        if let button = statusItem.button, button.window?.occlusionState.contains(.visible) == true {
+            button.performClick(nil)
+        } else {
+            menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
+        }
+    }
+
     // MARK: Building
 
     private var layout: Layout {
