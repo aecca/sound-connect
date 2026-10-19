@@ -229,7 +229,7 @@ impl Render for Panel {
         let body = match (connection, noise) {
             (Connection::Searching, _) => Self::message(
                 "Looking for your headphones",
-                "Make sure they're on and connected to this Mac.",
+                "Make sure they're on and connected to this computer.",
                 p,
             )
             .into_any_element(),

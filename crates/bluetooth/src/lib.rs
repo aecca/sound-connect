@@ -8,9 +8,11 @@ use std::sync::mpsc;
 
 pub use sc_protocol::{Battery, Codec, NoiseControl, NoiseMode, Request, Update};
 
+#[cfg(target_os = "linux")]
+mod linux;
 #[cfg(target_os = "macos")]
 mod macos;
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 mod unsupported;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -37,9 +39,11 @@ pub fn start(name_filter: Option<String>) -> Link {
     std::thread::Builder::new()
         .name("bluetooth".into())
         .spawn(move || {
+            #[cfg(target_os = "linux")]
+            linux::run(name_filter, request_rx, event_tx);
             #[cfg(target_os = "macos")]
             macos::run(name_filter, request_rx, event_tx);
-            #[cfg(not(target_os = "macos"))]
+            #[cfg(not(any(target_os = "macos", target_os = "linux")))]
             unsupported::run(name_filter, request_rx, event_tx);
         })
         .expect("failed to start the Bluetooth thread");
