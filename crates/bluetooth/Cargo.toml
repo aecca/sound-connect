@@ -1,0 +1,15 @@
+[package]
+name = "sc-bluetooth"
+description = "Bluetooth link to Sony headphones"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+sc-protocol.workspace = true
+async-channel.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = "0.3"
+objc2-io-bluetooth = "0.3"
