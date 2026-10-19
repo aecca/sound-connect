@@ -53,15 +53,18 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         menu.cancelTracking()
     }
 
-    /// Opens the menu under its icon or, when macOS hides the icon, where the
-    /// mouse is.
+    /// Opens the menu under its icon or, when macOS hides the icon because the
+    /// menu bar is full, where the icon would be: just right of the camera
+    /// notch, or at the top right of screens without one.
     func show() {
         NSApp.activate()
         if let button = statusItem.button, button.window?.occlusionState.contains(.visible) == true {
             button.performClick(nil)
-        } else {
-            menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
+            return
         }
+        guard let screen = NSScreen.main else { return }
+        let left = screen.auxiliaryTopRightArea?.minX ?? screen.frame.maxX - menu.size.width - 8
+        menu.popUp(positioning: nil, at: NSPoint(x: left, y: screen.visibleFrame.maxY), in: nil)
     }
 
     // MARK: Building
