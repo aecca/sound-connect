@@ -12,6 +12,7 @@ use gpui_kit::*;
 use sc_core::{AutoOff, Battery, Device, ListeningMode, Setting};
 
 use crate::headset::{Connection, Headset};
+use crate::update::{self, Status, Updates};
 
 pub const WIDTH: f32 = 300.;
 pub const HEIGHT: f32 = 460.;
@@ -82,6 +83,7 @@ impl Panel {
                     crate::tray::dismiss(window, cx);
                 }
             }),
+            cx.observe_global::<Updates>(|_, cx| cx.notify()),
             cx.observe_window_appearance(window, |_, window, cx| {
                 Theme::sync_system_appearance(Some(window), cx);
                 cx.notify();
@@ -134,6 +136,7 @@ impl Panel {
                     .child(div().text_size(px(11.)).text_color(p.secondary).child(status)),
             )
             .children(headset.battery.map(|battery| battery_indicator(battery, p)))
+            .children(update_button(p, cx))
     }
 
     fn modes(&self, device: &Device, p: Palette, cx: &App) -> impl IntoElement {
@@ -309,6 +312,31 @@ impl Render for Panel {
                     ),
             )
     }
+}
+
+/// A blue Update button, like the system's, while a new version is out.
+fn update_button(p: Palette, cx: &App) -> Option<AnyElement> {
+    let label = match cx.global::<Updates>().status {
+        Status::UpToDate => return None,
+        Status::Installing(_) => {
+            return Some(div().text_size(px(11.)).text_color(p.secondary).child("Updating…").into_any_element());
+        }
+        Status::Available(_) => "Update",
+        Status::Failed(_) => "Try Again",
+    };
+    let button = div()
+        .id("update")
+        .px_2p5()
+        .py_0p5()
+        .rounded_full()
+        .cursor_pointer()
+        .text_size(px(11.))
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(white())
+        .bg(p.accent)
+        .child(label)
+        .on_click(|_, _, cx| update::install(cx));
+    Some(button.into_any_element())
 }
 
 fn mode_icon(mode: ListeningMode) -> &'static str {

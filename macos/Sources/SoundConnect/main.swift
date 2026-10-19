@@ -3,22 +3,25 @@
 import AppKit
 import ServiceManagement
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let model = HeadsetModel()
+    private let updater = Updater()
     private var link: HeadsetLink?
     private var menu: StatusMenu?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if let folder = Snapshots.folder {
             let sample = Snapshots.sampleModel()
-            let menu = StatusMenu(model: sample)
+            let menu = StatusMenu(model: sample, updater: updater)
             self.menu = menu
             Snapshots.take(menu: menu, model: sample, into: folder)
             return
         }
         LoginItem.enableOnFirstLaunch()
         link = HeadsetLink(model: model)
-        menu = StatusMenu(model: model)
+        menu = StatusMenu(model: model, updater: updater)
+        updater.start()
     }
 }
 
@@ -46,7 +49,8 @@ enum LoginItem {
 setvbuf(stdout, nil, _IOLBF, 0)
 
 let app = NSApplication.shared
-let delegate = AppDelegate()
+// Top-level code runs on the main thread.
+let delegate = MainActor.assumeIsolated { AppDelegate() }
 app.delegate = delegate
 // Live in the menu bar only: no Dock icon, no app menu.
 app.setActivationPolicy(.accessory)

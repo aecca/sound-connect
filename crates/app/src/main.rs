@@ -5,6 +5,7 @@ mod headset;
 mod icon;
 mod panel;
 mod tray;
+mod update;
 
 use std::time::Duration;
 
@@ -40,6 +41,7 @@ fn main() {
         .detach();
 
         tray::install(headset.clone(), cx);
+        update::start(cx);
 
         // Development aid: open the panel right away, e.g. to screenshot it.
         if std::env::var_os("SOUND_CONNECT_OPEN_PANEL").is_some() {

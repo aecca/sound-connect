@@ -10,6 +10,7 @@ import SwiftUI
 @MainActor
 final class StatusMenu: NSObject, NSMenuDelegate {
     private let model: HeadsetModel
+    private let updater: Updater
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     private let menu = NSMenu()
 
@@ -30,8 +31,9 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         case message(String, connect: [String])
     }
 
-    init(model: HeadsetModel) {
+    init(model: HeadsetModel, updater: Updater) {
         self.model = model
+        self.updater = updater
         super.init()
         menu.delegate = self
         menu.autoenablesItems = false
@@ -96,7 +98,10 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         autoOffItems = []
 
         // Views inside menus need a real frame; SwiftUI sizes the header itself.
-        let header = NSHostingView(rootView: HeaderView(model: model))
+        let header = NSHostingView(rootView: HeaderView(model: model, updater: updater) { [weak self] in
+            self?.menu.cancelTracking()
+            self?.updater.install()
+        })
         header.frame = NSRect(origin: .zero, size: header.fittingSize)
         menu.addItem(viewItem(header))
         menu.addItem(.separator())
@@ -318,9 +323,12 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     }
 }
 
-/// Headphones name, connection details and battery, like the AirPods header.
+/// Headphones name, connection details and battery, like the AirPods header,
+/// and an Update button while a new version is out.
 private struct HeaderView: View {
     let model: HeadsetModel
+    let updater: Updater
+    let update: () -> Void
 
     var body: some View {
         HStack(spacing: 10) {
@@ -349,6 +357,17 @@ private struct HeaderView: View {
                 if let right = model.rightBattery { BatteryLabel(title: "R", battery: right) }
                 if let charging = model.caseBattery { BatteryLabel(title: "Case", battery: charging) }
             }
+
+            switch updater.status {
+            case .upToDate: EmptyView()
+            case .available(let version):
+                Button("Update", action: update).buttonStyle(PillButtonStyle()).help("Install Sound Connect \(version)")
+            case .installing:
+                Text("Updating…").font(.system(size: 11)).foregroundStyle(.secondary)
+            case .failed(let version):
+                Button("Try Again", action: update).buttonStyle(PillButtonStyle())
+                    .help("Sound Connect \(version) didn't install. Details are in ~/Library/Logs/Sound Connect/update.log.")
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 6)
@@ -372,6 +391,18 @@ private struct HeaderView: View {
                 .compactMap { $0 }
                 .joined(separator: " · ")
         }
+    }
+}
+
+/// A small blue capsule button, like Update in the App Store.
+private struct PillButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 3)
+            .background(Capsule().fill(Color.accentColor.opacity(configuration.isPressed ? 0.75 : 1)))
     }
 }
 

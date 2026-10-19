@@ -71,6 +71,8 @@ git push origin v0.2.0
 
 Update `version` in `Cargo.toml` first. `install.sh` always installs the latest release.
 
+Installed apps find the new version on their own. Once a day they ask where GitHub's latest-release link redirects (`.../releases/tag/v0.2.0`) and, if it's newer, offer "Update to 0.2.0" in the menu or panel. Clicking it runs that release's `install.sh`, which quits the app, replaces it and opens the new one; its output goes to `~/Library/Logs/Sound Connect/update.log` on a Mac and `~/.local/state/sound-connect/update.log` on Linux. The code is `macos/Sources/SoundConnect/Updater.swift` and `crates/app/src/update.rs`; the Linux app uses `curl`, which the installer needs anyway, so it carries no HTTP or TLS code.
+
 ## Where the protocols come from
 
 Sony's byte layouts come from [Gadgetbridge](https://codeberg.org/Freeyourgadget/Gadgetbridge) and [Sony Device Center](https://github.com/marconvcm/sony-device-center); Bose's from [bosectl](https://github.com/alabalag1/bosectl) and [based-connect](https://github.com/Denton-L/based-connect). They're checked against real headphones where possible, and comments in `crates/core` say which layouts haven't been tried on hardware yet.

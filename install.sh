@@ -48,7 +48,7 @@ source_dir() {
   if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
     here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   fi
-  if [ -n "$here" ] && [ -f "$here/Cargo.toml" ] && [ -d "$here/crates/protocol" ]; then
+  if [ -n "$here" ] && [ -f "$here/Cargo.toml" ] && [ -d "$here/crates/core" ]; then
     echo "$here"
   else
     git clone --quiet --depth 1 "https://github.com/$REPO.git" "$TMP/src"
@@ -96,7 +96,9 @@ install_macos() {
 
   ditto -x -k "$TMP/app.zip" "$TMP/app"
   mkdir -p "$apps"
-  pkill -x SoundConnect 2>/dev/null || true
+  # -a: macOS's pkill skips its own ancestors otherwise, and when the app
+  # updates itself, it's the one that started this script.
+  pkill -a -x SoundConnect 2>/dev/null || true
   rm -rf "$app"
   mv "$TMP/app/Sound Connect.app" "$app"
   # curl downloads aren't quarantined, but clear it in case.

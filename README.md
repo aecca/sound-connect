@@ -38,6 +38,8 @@ That's it. It works on **Mac**, **Ubuntu** and **Omarchy**, and on other Linux s
 
 On Linux, it may ask for your password to add a few small system packages, but only if they're missing.
 
+When there's a new version, **Update** appears in Sound Connect's menu. One click installs it.
+
 ## What you can do
 
 Sound Connect sits in your menu bar (or your system tray on Linux). Click the headphones icon to:
@@ -91,6 +93,7 @@ Sound Connect shows only the settings your model has. Older Sony models, such as
 
 ## Something not working?
 
+- **I don't see the icon on my Mac.** When the menu bar is full, macOS hides the icons that don't fit beside the camera notch. Hold ⌘ and drag icons you don't need out of the menu bar, or quit menu bar apps you aren't using.
 - **I don't see the icon on Linux.** GNOME only shows tray icons with the [AppIndicator extension](https://extensions.gnome.org/extension/615/appindicator-support/). On Omarchy, the icon appears in the top bar's tray.
 - **It keeps saying "Looking for your headphones".** Make sure they're on and connected to this computer in its Bluetooth settings. If they are, turn them off and on again.
 - **On a Mac, it never finds them.** Check that Sound Connect is allowed in System Settings › Privacy & Security › Bluetooth.
