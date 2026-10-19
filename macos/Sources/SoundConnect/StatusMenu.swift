@@ -47,6 +47,18 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         observe()
     }
 
+    /// Shows the menu at a point on screen, e.g. for snapshots, whether or
+    /// not the menu bar icon is visible; returns once it closes. Menus follow
+    /// the system's light or dark mode unless given an appearance.
+    func popUp(at point: NSPoint, appearance: NSAppearance?) {
+        menu.appearance = appearance
+        menu.popUp(positioning: nil, at: point, in: nil)
+    }
+
+    func close() {
+        menu.cancelTracking()
+    }
+
     // MARK: Building
 
     private var layout: Layout {
@@ -299,6 +311,7 @@ private struct HeaderView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 6)
         .frame(width: 290, alignment: .leading)
+        .help(model.firmware.map { "Firmware \($0)" } ?? "")
     }
 
     private var isConnected: Bool {
@@ -313,7 +326,7 @@ private struct HeaderView: View {
         case .connected:
             // Be upfront when this model's support hasn't been tried yet.
             let untested = model.profile.map { !$0.tested } == true ? "Untested model" : nil
-            return ["Connected", model.codec, model.firmware.map { "Firmware \($0)" }, untested]
+            return ["Connected", model.codec, untested]
                 .compactMap { $0 }
                 .joined(separator: " · ")
         }
@@ -353,7 +366,7 @@ private struct BatteryLabel: View {
 /// slider in the Sound menu.
 private final class LevelSliderView: NSView {
     /// Lines up with the indented "Focus on Voice" item below it.
-    private static let indent: CGFloat = 57
+    private static let indent: CGFloat = 62
     private let slider = NSSlider(value: 20, minValue: 1, maxValue: 20, target: nil, action: nil)
     private let onChange: (UInt8) -> Void
 

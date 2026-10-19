@@ -9,6 +9,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var menu: StatusMenu?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if let folder = Snapshots.folder {
+            let sample = Snapshots.sampleModel()
+            let menu = StatusMenu(model: sample)
+            self.menu = menu
+            Snapshots.take(menu: menu, model: sample, into: folder)
+            return
+        }
         LoginItem.enableOnFirstLaunch()
         link = HeadsetLink(model: model)
         menu = StatusMenu(model: model)
