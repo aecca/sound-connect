@@ -37,11 +37,14 @@ pub struct Output {
 
 impl Session {
     /// Queues a request and returns any frames to write now. A new
-    /// noise-control change replaces one that has not been sent yet, so
-    /// dragging a slider doesn't build a backlog.
+    /// noise-control or equalizer change replaces one that has not been sent
+    /// yet, so dragging a slider doesn't build a backlog.
     pub fn request(&mut self, request: Request, now: Instant) -> Vec<Vec<u8>> {
         if matches!(request, Request::SetNoiseControl(_)) {
             self.queue.retain(|r| !matches!(r, Request::SetNoiseControl(_)));
+        }
+        if matches!(request, Request::SetEqualizerBands { .. }) {
+            self.queue.retain(|r| !matches!(r, Request::SetEqualizerBands { .. }));
         }
         self.queue.push_back(request);
         self.pump(now)

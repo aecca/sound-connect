@@ -55,6 +55,8 @@ impl Headset {
                 Update::Codec(codec) => self.codec = Some(codec),
                 Update::NoiseControl(noise) => self.noise = Some(noise),
                 Update::SpeakToChat(on) => self.speak_to_chat = Some(on),
+                // Not shown in this panel yet.
+                Update::Equalizer(_) | Update::Dsee(_) => {}
             },
         }
     }

@@ -1,3 +1,5 @@
 /target
 /dist
+/macos/.build
+/macos/Generated
 .DS_Store

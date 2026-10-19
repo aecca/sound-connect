@@ -64,6 +64,91 @@ impl Codec {
     }
 }
 
+/// Sound presets, as named in Sony's app. `Manual` uses the custom bands.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EqPreset {
+    Off,
+    Bright,
+    Excited,
+    Mellow,
+    Relaxed,
+    Vocal,
+    TrebleBoost,
+    BassBoost,
+    Speech,
+    Manual,
+    Custom1,
+    Custom2,
+    Unknown(u8),
+}
+
+impl EqPreset {
+    pub const ALL: [EqPreset; 12] = [
+        Self::Off,
+        Self::Bright,
+        Self::Excited,
+        Self::Mellow,
+        Self::Relaxed,
+        Self::Vocal,
+        Self::TrebleBoost,
+        Self::BassBoost,
+        Self::Speech,
+        Self::Manual,
+        Self::Custom1,
+        Self::Custom2,
+    ];
+
+    fn code(self) -> u8 {
+        match self {
+            Self::Off => 0x00,
+            Self::Bright => 0x10,
+            Self::Excited => 0x11,
+            Self::Mellow => 0x12,
+            Self::Relaxed => 0x13,
+            Self::Vocal => 0x14,
+            Self::TrebleBoost => 0x15,
+            Self::BassBoost => 0x16,
+            Self::Speech => 0x17,
+            Self::Manual => 0xa0,
+            Self::Custom1 => 0xa1,
+            Self::Custom2 => 0xa2,
+            Self::Unknown(code) => code,
+        }
+    }
+
+    fn from_code(code: u8) -> Self {
+        Self::ALL.into_iter().find(|p| p.code() == code).unwrap_or(Self::Unknown(code))
+    }
+
+    pub fn name(self) -> String {
+        match self {
+            Self::Off => "Off".into(),
+            Self::Bright => "Bright".into(),
+            Self::Excited => "Excited".into(),
+            Self::Mellow => "Mellow".into(),
+            Self::Relaxed => "Relaxed".into(),
+            Self::Vocal => "Vocal".into(),
+            Self::TrebleBoost => "Treble Boost".into(),
+            Self::BassBoost => "Bass Boost".into(),
+            Self::Speech => "Speech".into(),
+            Self::Manual => "Manual".into(),
+            Self::Custom1 => "Custom 1".into(),
+            Self::Custom2 => "Custom 2".into(),
+            Self::Unknown(code) => format!("Preset 0x{code:02x}"),
+        }
+    }
+}
+
+/// Five-band equalizer with Clear Bass (WH-1000XM5 and similar). Every
+/// value is a step from -10 to +10.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Equalizer {
+    pub preset: EqPreset,
+    pub clear_bass: i8,
+    /// 400 Hz, 1 kHz, 2.5 kHz, 6.3 kHz, 16 kHz.
+    pub bands: [i8; 5],
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Request {
     Init,
@@ -74,6 +159,13 @@ pub enum Request {
     SetNoiseControl(NoiseControl),
     SpeakToChat,
     SetSpeakToChat(bool),
+    Equalizer,
+    SetEqualizerPreset(EqPreset),
+    /// Switches to the Manual preset with these values.
+    SetEqualizerBands { clear_bass: i8, bands: [i8; 5] },
+    /// DSEE Extreme, Sony's upscaling for compressed music.
+    Dsee,
+    SetDsee(bool),
 }
 
 /// Noise-control "inquired type" used by v2 headsets. 0x15 gets no reply on
@@ -82,6 +174,11 @@ const NOISE_TYPE: u8 = 0x17;
 /// Speak-to-Chat lives among the "system" settings (0xf6..0xf9), as type 0x0c.
 /// Its value is inverted: 0x00 means on.
 const SPEAK_TO_CHAT: u8 = 0x0c;
+/// Equalizer layout with five bands plus Clear Bass. (The WH-1000XM6 uses a
+/// ten-band layout, 0x04, which isn't supported yet.)
+const EQ_FIVE_BANDS: u8 = 0x00;
+/// Equalizer values are sent offset by 10, so -10..=10 becomes 0..=20.
+const EQ_OFFSET: i8 = 10;
 
 impl Request {
     pub fn payload(&self) -> Vec<u8> {
@@ -102,6 +199,16 @@ impl Request {
             ],
             Self::SpeakToChat => vec![0xf6, SPEAK_TO_CHAT],
             Self::SetSpeakToChat(on) => vec![0xf8, SPEAK_TO_CHAT, (!on) as u8, 0x01],
+            Self::Equalizer => vec![0x56, EQ_FIVE_BANDS],
+            Self::SetEqualizerPreset(preset) => vec![0x58, EQ_FIVE_BANDS, preset.code(), 0x00],
+            Self::SetEqualizerBands { clear_bass, bands } => {
+                let mut payload = vec![0x58, EQ_FIVE_BANDS, EqPreset::Manual.code(), 0x06];
+                let values = std::iter::once(*clear_bass).chain(bands.iter().copied());
+                payload.extend(values.map(|v| (v.clamp(-10, 10) + EQ_OFFSET) as u8));
+                payload
+            }
+            Self::Dsee => vec![0xe6, 0x01],
+            Self::SetDsee(on) => vec![0xe8, 0x01, *on as u8],
         }
     }
 }
@@ -116,6 +223,8 @@ pub enum Update {
     Codec(Codec),
     NoiseControl(NoiseControl),
     SpeakToChat(bool),
+    Equalizer(Equalizer),
+    Dsee(bool),
 }
 
 /// Parses a reply or notification payload. Returns `None` for messages this
@@ -143,6 +252,15 @@ pub fn parse(p: &[u8]) -> Option<Update> {
             }))
         }
         0xf7 | 0xf9 if p.len() >= 3 && p[1] == SPEAK_TO_CHAT => Some(Update::SpeakToChat(p[2] == 0x00)),
+        0x57 | 0x59 if p.len() == 10 && p[1] == EQ_FIVE_BANDS && p[3] == 0x06 => {
+            let value = |i: usize| p[i] as i8 - EQ_OFFSET;
+            Some(Update::Equalizer(Equalizer {
+                preset: EqPreset::from_code(p[2]),
+                clear_bass: value(4),
+                bands: [value(5), value(6), value(7), value(8), value(9)],
+            }))
+        }
+        0xe7 | 0xe9 if p.len() >= 3 && p[1] == 0x01 => Some(Update::Dsee(p[2] == 0x01)),
         _ => None,
     }
 }
@@ -202,6 +320,33 @@ mod tests {
         assert_eq!(parse(&[0xf9, 0x0c, 0x01, 0x01]), Some(Update::SpeakToChat(false)));
         // Other system settings share these opcodes.
         assert_eq!(parse(&[0xf7, 0x01, 0x00, 0x01]), None);
+    }
+
+    #[test]
+    fn encodes_and_parses_the_equalizer() {
+        assert_eq!(Request::SetEqualizerPreset(EqPreset::BassBoost).payload(), [0x58, 0x00, 0x16, 0x00]);
+        assert_eq!(
+            Request::SetEqualizerBands { clear_bass: 3, bands: [-10, -1, 0, 1, 12] }.payload(),
+            [0x58, 0x00, 0xa0, 0x06, 13, 0, 9, 10, 11, 20]
+        );
+        assert_eq!(
+            parse(&[0x59, 0x00, 0xa0, 0x06, 13, 0, 9, 10, 11, 20]),
+            Some(Update::Equalizer(Equalizer {
+                preset: EqPreset::Manual,
+                clear_bass: 3,
+                bands: [-10, -1, 0, 1, 10],
+            }))
+        );
+        assert_eq!(parse(&[0x57, 0x00, 0x99, 0x06, 10, 10, 10, 10, 10, 10]).map(|u| match u {
+            Update::Equalizer(eq) => eq.preset,
+            _ => unreachable!(),
+        }), Some(EqPreset::Unknown(0x99)));
+    }
+
+    #[test]
+    fn encodes_and_parses_dsee() {
+        assert_eq!(Request::SetDsee(true).payload(), [0xe8, 0x01, 0x01]);
+        assert_eq!(parse(&[0xe7, 0x01, 0x00]), Some(Update::Dsee(false)));
     }
 
     #[test]

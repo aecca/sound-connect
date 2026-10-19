@@ -12,7 +12,10 @@ Sound Connect lives in your menu bar. Click the headphones icon to:
 - Switch between **Noise cancelling**, **Ambient sound** and **Off**
 - Choose how much outside sound you hear, and turn on **Focus on voice**
 - Turn **Speak-to-Chat** on or off (it switches to ambient sound when you start talking)
+- Pick an **equalizer** preset, or shape your own sound with five bands and Clear Bass
+- Turn on **DSEE Extreme** to bring back detail in compressed music
 - Check your **battery level**
+- **Connect** your headphones with one click when they're paired but not connected
 
 If you change the mode with the button on your headphones, Sound Connect shows the change right away.
 
