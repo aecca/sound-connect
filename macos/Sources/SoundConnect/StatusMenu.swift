@@ -33,6 +33,8 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     private var autoOffItem: NSMenuItem?
     private var autoOffItems: [(AutoOff, NSMenuItem)] = []
     private var playFromItem: NSMenuItem?
+    /// The devices "Play Audio From" lists, and their items.
+    private var playFromItems: [(ConnectedDevice, NSMenuItem)] = []
     private var noiseButtonItem: NSMenuItem?
     private var noiseButtonItems: [(NoiseButton, NSMenuItem)] = []
     private var shortcutItem: NSMenuItem?
@@ -147,6 +149,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         autoOffItem = nil
         autoOffItems = []
         playFromItem = nil
+        playFromItems = []
         noiseButtonItem = nil
         noiseButtonItems = []
 
@@ -182,13 +185,14 @@ final class StatusMenu: NSObject, NSMenuDelegate {
                     item.toolTip = featureDescription(feature: feature)
                     menu.addItem(item)
                     featureItems.append((feature, item))
-                }
-                if device.speakToChatOptions {
-                    let item = NSMenuItem(title: "Speak-to-Chat Options", action: nil, keyEquivalent: "")
-                    item.indentationLevel = 1
-                    item.submenu = speakToChatMenu()
-                    chatOptionsItem = item
-                    menu.addItem(item)
+                    // Its options sit right under it, like Ambient Sound's.
+                    if feature == .speakToChat, device.speakToChatOptions {
+                        let options = NSMenuItem(title: "Speak-to-Chat Options", action: nil, keyEquivalent: "")
+                        options.indentationLevel = 1
+                        options.submenu = speakToChatMenu()
+                        chatOptionsItem = options
+                        menu.addItem(options)
+                    }
                 }
             }
             if device.equalizer != nil {
@@ -342,17 +346,24 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         return submenu
     }
 
-    /// The connected devices change while the menu stays as it is, so their
-    /// items are rebuilt each time.
+    /// The connected devices change while the rest of the menu stays as it
+    /// is, so their items are remade when another device comes or goes.
     private func updatePlayFrom() {
         guard let playFromItem, let submenu = playFromItem.submenu else { return }
-        playFromItem.isHidden = model.connectedDevices.count < 2
-        submenu.removeAllItems()
-        for device in model.connectedDevices {
-            let item = actionItem(device.name, #selector(playFrom(_:)))
-            item.representedObject = device.id
-            item.state = device.playing ? .on : .off
-            submenu.addItem(item)
+        let devices = model.connectedDevices
+        playFromItem.isHidden = devices.count < 2
+        let listed = playFromItems.map { ($0.0.id, $0.0.name) }
+        if listed.map(\.0) != devices.map(\.id) || listed.map(\.1) != devices.map(\.name) {
+            submenu.removeAllItems()
+            playFromItems = devices.map { device in
+                let item = actionItem(device.name, #selector(playFrom(_:)))
+                item.representedObject = device.id
+                submenu.addItem(item)
+                return (device, item)
+            }
+        }
+        for (device, item) in playFromItems {
+            item.state = devices.first { $0.id == device.id }?.playing == true ? .on : .off
         }
     }
 

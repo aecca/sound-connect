@@ -20,7 +20,6 @@ final class BatteryAlerts: NSObject, UNUserNotificationCenterDelegate {
     init(model: HeadsetModel) {
         self.model = model
         super.init()
-        UNUserNotificationCenter.current().delegate = self
         observe()
     }
 
@@ -48,7 +47,10 @@ final class BatteryAlerts: NSObject, UNUserNotificationCenterDelegate {
         content.title = "Your headphones' battery is low"
         content.body = "\(brandName(brand: device.brand)) \(device.model) has \(battery.level)% left."
         let request = UNNotificationRequest(identifier: "low-battery", content: content, trigger: nil)
+        // Only reached with an app bundle: the notification center needs one,
+        // and the README snapshots run without.
         let center = UNUserNotificationCenter.current()
+        center.delegate = self
         center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
             if granted { center.add(request) }
         }

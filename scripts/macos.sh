@@ -17,8 +17,12 @@ command -v cargo >/dev/null || source "$HOME/.cargo/env"
 
 VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
 
-bundle() { # <binary> <bundle path> <bundle id> <display name>
-  local binary=$1 app=$2 id=$3 name=$4
+bundle() { # <binary> <bundle path> <bundle id> <display name> [URL scheme it opens]
+  local binary=$1 app=$2 id=$3 name=$4 scheme=${5:-} urls=""
+  if [ -n "$scheme" ]; then
+    urls="<key>CFBundleURLTypes</key><array><dict><key>CFBundleURLName</key><string>$id</string><key>CFBundleURLSchemes</key><array><string>$scheme</string></array></dict></array>"
+  fi
+
   rm -rf "$app"
   mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
   cp "$binary" "$app/Contents/MacOS/"
@@ -38,13 +42,7 @@ bundle() { # <binary> <bundle path> <bundle id> <display name>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><true/>
   <key>NSBluetoothAlwaysUsageDescription</key><string>Sound Connect uses Bluetooth to read and change your headphone settings.</string>
-  <key>CFBundleURLTypes</key>
-  <array>
-    <dict>
-      <key>CFBundleURLName</key><string>$id</string>
-      <key>CFBundleURLSchemes</key><array><string>soundconnect</string></array>
-    </dict>
-  </array>
+  $urls
 </dict>
 </plist>
 EOF
@@ -84,7 +82,7 @@ native() { # <debug|release> <bundle path>
   swift build --package-path macos --disable-sandbox -c "$1"
   local bin
   bin="$(swift build --package-path macos --disable-sandbox -c "$1" --show-bin-path)/SoundConnect"
-  bundle "$bin" "$2" io.github.aecca.sound-connect "Sound Connect"
+  bundle "$bin" "$2" io.github.aecca.sound-connect "Sound Connect" soundconnect
 }
 
 relaunch() { # <bundle path>
@@ -114,7 +112,7 @@ case "${1:-run}" in
     bin=target/universal/SoundConnect
     lipo -create -output "$bin" "${bins[@]}"
     rm -rf dist/package
-    bundle "$bin" "dist/package/Sound Connect.app" io.github.aecca.sound-connect "Sound Connect"
+    bundle "$bin" "dist/package/Sound Connect.app" io.github.aecca.sound-connect "Sound Connect" soundconnect
     rm -f dist/SoundConnect-macos.zip
     ditto -c -k --norsrc --noextattr --keepParent "dist/package/Sound Connect.app" dist/SoundConnect-macos.zip
     echo "Built dist/SoundConnect-macos.zip ($VERSION; $(lipo -archs "$bin"))"
