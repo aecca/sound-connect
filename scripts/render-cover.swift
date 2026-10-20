@@ -25,13 +25,15 @@ func write(_ lines: [String], font: NSFont, spacing: CGFloat, x: CGFloat, top: C
 }
 
 /// Draws one of the README pictures, saved at 2x, at `scale` of its pixel
-/// size with its top left corner at `x`, `top`.
-func place(_ name: String, x: CGFloat, top: CGFloat, scale: CGFloat) {
+/// size with its top left corner at `x`, `top`, or centered from top to
+/// bottom without `top`.
+func place(_ name: String, x: CGFloat, top: CGFloat? = nil, scale: CGFloat) {
     let url = folder.appendingPathComponent(name)
     guard let data = try? Data(contentsOf: url), let picture = NSBitmapImageRep(data: data) else {
         fatalError("can't read \(url.path)")
     }
     let size = NSSize(width: CGFloat(picture.pixelsWide) * scale, height: CGFloat(picture.pixelsHigh) * scale)
+    let top = top ?? (height + size.height) / 2
     picture.draw(
         in: NSRect(origin: NSPoint(x: x, y: top - size.height), size: size), from: .zero, operation: .sourceOver,
         fraction: 1, respectFlipped: false, hints: nil)
@@ -52,8 +54,8 @@ write(["Sound", "Connect"], font: rounded(196, .heavy), spacing: 1, x: 132, top:
 write(["Your Headphones,", "One Click Away."], font: rounded(70, .bold), spacing: 1.2, x: 140, top: 330)
 
 // The equalizer behind, the menu in front of it.
-place("equalizer-dark.png", x: 1470, top: height - 280, scale: 0.95)
-place("menu-dark.png", x: 960, top: height - 70, scale: 1.1)
+place("equalizer-dark.png", x: 1470, top: height - 330, scale: 0.95)
+place("menu-dark.png", x: 960, scale: 1.1)
 
 NSGraphicsContext.restoreGraphicsState()
 try cover.representation(using: .png, properties: [:])!.write(to: folder.appendingPathComponent("cover.png"))

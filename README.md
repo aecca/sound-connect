@@ -21,10 +21,11 @@
 - **Hear yourself on calls**: Switches to Ambient Sound on its own when a call starts, and back when it ends
 - **Shape your sound**: Pick an equalizer preset or make your own, and turn on DSEE Extreme to bring back detail in compressed music
 - **Battery at a glance**: See each earbud and the case, get a notification when it runs low, and on a Mac, see it next to the menu bar icon
-- **Smart settings**: Speak-to-Chat and how readily it notices you, voice prompts, pausing music when you take your headphones off, and when they turn off on their own
+- **Smart settings**: Speak-to-Chat and how readily it notices you, voice prompts, pausing music when you take your headphones off, and when they turn off on their own. On a Mac, you can also turn them off from the menu
 - **Buttons your way**: Choose what the noise control button switches between, or have the Bose Action button change noise cancelling
 - **Switch devices**: When your Sony headphones are connected to your phone and your computer at once, choose which one you hear
 - **One-click connect**: Connect your headphones when they're paired but not connected
+- **See every change**: On a Mac, a pop-up shows the new mode when you change it with the button on your headphones or a shortcut
 - **Shortcuts and scripts**: Switch modes with a keyboard shortcut in any app, from Shortcuts, Raycast or Alfred, or show your headphones in Waybar
 
 <p align="center">
@@ -68,7 +69,7 @@ When there's a new version, **Update** appears in Sound Connect's menu. One clic
 
 ## Keyboard Shortcut
 
-On a Mac, turn on **Switch Modes with ⌃⌥⌘N** in Sound Connect's menu. Then press Control-Option-Command-N in any app to go to the next mode.
+On a Mac, turn on **Switch Modes with ⌃⌥⌘N** in **Sound Connect Settings**, in Sound Connect's menu. Then press Control-Option-Command-N in any app to go to the next mode.
 
 On Linux, add a keyboard shortcut in your system settings that runs this command:
 
@@ -154,4 +155,4 @@ Sound Connect is an independent project. It isn't made, endorsed or supported by
 
 ## Thanks
 
-Sound Connect builds on the work of open-source projects that figured out how these headphones communicate, especially [Gadgetbridge](https://gadgetbridge.org), [SonyHeadphonesClient](https://github.com/mos9527/SonyHeadphonesClient) and [Sony Device Center](https://github.com/marconvcm/sony-device-center) for Sony, and [bosectl](https://github.com/alabalag1/bosectl) and [based-connect](https://github.com/Denton-L/based-connect) for Bose.
+Sound Connect builds on the work of open-source projects that figured out how these headphones communicate, especially [Gadgetbridge](https://gadgetbridge.org), [SonyHeadphonesClient](https://github.com/mos9527/SonyHeadphonesClient), [Sony Device Center](https://github.com/marconvcm/sony-device-center) and [acouplet](https://github.com/baglayan/acouplet) for Sony, and [bosectl](https://github.com/alabalag1/bosectl) and [based-connect](https://github.com/Denton-L/based-connect) for Bose.
