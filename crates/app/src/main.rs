@@ -4,6 +4,7 @@ mod assets;
 mod battery_alerts;
 mod calls;
 mod control;
+mod equalizer;
 mod headset;
 mod icon;
 mod microphone;

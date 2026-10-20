@@ -66,8 +66,6 @@ If you change the mode with the button on your headphones, Sound Connect shows t
   </picture>
 </p>
 
-On Linux, the equalizer is coming soon.
-
 ## Light and fast
 
 - **Small.** About 1 MB to download on a Mac, and about 15 MB on Linux.

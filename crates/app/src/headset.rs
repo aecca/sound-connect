@@ -8,7 +8,8 @@ use std::sync::mpsc;
 use gpui_kit::*;
 use sc_bluetooth::{Event, Request};
 use sc_core::{
-    AutoOff, Battery, Device, Feature, ListeningMode, NoiseButton, Setting, SpeakToChatEnd, Update, VoiceSensitivity,
+    AutoOff, Battery, Device, EqPreset, Equalizer, Feature, ListeningMode, NoiseButton, Setting, SpeakToChatEnd,
+    Update, VoiceSensitivity,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -38,6 +39,7 @@ pub struct Headset {
     pub noise_button: Option<NoiseButton>,
     pub voice_sensitivity: Option<VoiceSensitivity>,
     pub speak_to_chat_end: Option<SpeakToChatEnd>,
+    pub equalizer: Option<Equalizer>,
     /// Supported headsets paired with this computer but not connected.
     pub paired: Vec<String>,
     /// The paired headset the user asked to connect, while that's under way.
@@ -66,6 +68,7 @@ impl Headset {
             noise_button: None,
             voice_sensitivity: None,
             speak_to_chat_end: None,
+            equalizer: None,
             paired: Vec::new(),
             connecting: None,
             notice: None,
@@ -115,8 +118,9 @@ impl Headset {
             Update::NoiseButton(choice) => self.noise_button = Some(choice),
             Update::VoiceSensitivity(sensitivity) => self.voice_sensitivity = Some(sensitivity),
             Update::SpeakToChatEnd(end) => self.speak_to_chat_end = Some(end),
-            // Not shown in this panel yet.
-            Update::Firmware(_) | Update::Equalizer(_) => {}
+            Update::Equalizer(equalizer) => self.equalizer = Some(equalizer),
+            // Not shown on Linux.
+            Update::Firmware(_) => {}
         }
     }
 
@@ -142,8 +146,18 @@ impl Headset {
             Setting::NoiseButton(choice) => self.noise_button.replace(choice) != Some(choice),
             Setting::VoiceSensitivity(sensitivity) => self.voice_sensitivity.replace(sensitivity) != Some(sensitivity),
             Setting::SpeakToChatEnd(end) => self.speak_to_chat_end.replace(end) != Some(end),
-            // This panel has no equalizer; the change still goes through.
-            Setting::EqualizerPreset(_) | Setting::EqualizerBands(_) => true,
+            Setting::EqualizerPreset(preset) => match &mut self.equalizer {
+                Some(equalizer) if equalizer.preset != preset => {
+                    equalizer.preset = preset;
+                    true
+                }
+                _ => false,
+            },
+            // Moving a band switches to the manual preset.
+            Setting::EqualizerBands(bands) => {
+                let manual = Equalizer { preset: EqPreset::Manual, bands };
+                self.equalizer.is_some() && self.equalizer.replace(manual) != Some(manual)
+            }
         };
         if changed {
             let _ = self.requests.send(Request::Change(setting));

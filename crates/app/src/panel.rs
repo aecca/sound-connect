@@ -13,6 +13,7 @@ use gpui_kit::*;
 use sc_core::{AutoOff, Battery, Device, Feature, ListeningMode, Setting, SpeakToChatEnd, VoiceSensitivity};
 
 use crate::calls::Calls;
+use crate::equalizer;
 use crate::headset::{Connection, Headset};
 use crate::settings::{self, Settings};
 use crate::update::{self, Status, Updates};
@@ -266,6 +267,24 @@ impl Panel {
         }))
     }
 
+    /// The current preset, opening the equalizer window when clicked.
+    fn equalizer(&self, p: Palette, cx: &App) -> Option<impl IntoElement> {
+        let preset = self.headset.read(cx).equalizer?.preset;
+        let headset = self.headset.clone();
+        let row = h_flex()
+            .id("equalizer")
+            .px_2()
+            .py_1()
+            .justify_between()
+            .rounded(px(6.))
+            .cursor_pointer()
+            .hover(|style| style.bg(p.hover))
+            .child("Equalizer")
+            .child(div().text_color(p.secondary).child(format!("{} ›", preset.name())))
+            .on_click(move |_, _, cx| equalizer::show(&headset, cx));
+        Some(row)
+    }
+
     /// Shown once the headset has reported it, like the features.
     fn auto_off(&self, device: &Device, p: Palette, cx: &App) -> Option<impl IntoElement> {
         let current = self.headset.read(cx).auto_off.filter(|_| !device.auto_off.is_empty())?;
@@ -393,6 +412,7 @@ impl Panel {
             .when_some(device.ambient.as_ref(), |this, ambient| this.child(self.ambient(ambient.focus_on_voice, p, cx)))
             .children(self.calls(p, cx))
             .when(!device.features.is_empty(), |this| this.child(separator(p)).child(self.features(device, p, cx)))
+            .when_some(self.equalizer(p, cx), |this, equalizer| this.child(separator(p)).child(equalizer))
             .when_some(self.auto_off(device, p, cx), |this, auto_off| this.child(separator(p)).child(auto_off))
             .when_some(self.noise_button(device, p, cx), |this, button| this.child(separator(p)).child(button))
             .child(separator(p))
