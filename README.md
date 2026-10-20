@@ -5,7 +5,7 @@
 <h1 align="center">Sound Connect</h1>
 
 <p align="center">
-  Control your Sony and Bose headphones from your Mac or Linux computer.<br>
+  A light, fast app to control your Sony and Bose headphones from your Mac or Linux computer.<br>
   No phone needed.
 </p>
 
