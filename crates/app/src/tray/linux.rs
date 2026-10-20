@@ -3,10 +3,12 @@
 //! clicked rather than where the icon is, and sometimes not even that.
 
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
+use std::thread;
 
 use gpui_kit::layer_shell::{self, KeyboardInteractivity, Layer, LayerShellNotSupportedError, LayerShellOptions};
 use gpui_kit::*;
-use ksni::blocking::{Handle, TrayMethods};
+use ksni::blocking::TrayMethods;
 
 use crate::{icon, panel};
 
@@ -17,21 +19,38 @@ pub type Anchor = Option<Point<Pixels>>;
 const MARGIN: f32 = 8.;
 
 pub struct Tray {
-    handle: Option<Handle<Item>>,
+    /// Changes for the tooltip, for the thread that owns the icon.
+    statuses: Option<mpsc::Sender<String>>,
 }
 
 impl Tray {
     pub fn new(clicks: async_channel::Sender<Anchor>) -> Self {
         // Keep going without a tray host: the icon appears once one starts.
-        let handle = Item::new(clicks).assume_sni_available(true).spawn();
-        Self { handle: handle.inspect_err(|error| eprintln!("failed to add the tray icon: {error}")).ok() }
+        let handle = match Item::new(clicks).assume_sni_available(true).spawn() {
+            Ok(handle) => handle,
+            Err(error) => {
+                eprintln!("failed to add the tray icon: {error}");
+                return Self { statuses: None };
+            }
+        };
+        // Updating the icon waits on D-Bus, which can take a while when the
+        // tray host restarts, so it happens away from the UI.
+        let (statuses, changes) = mpsc::channel::<String>();
+        let spawned = thread::Builder::new().name("tray".into()).spawn(move || {
+            while let Ok(mut status) = changes.recv() {
+                // Only the latest one matters.
+                status = changes.try_iter().last().unwrap_or(status);
+                handle.update(|item| item.status = status);
+            }
+        });
+        Self { statuses: spawned.is_ok().then_some(statuses) }
     }
 
     /// What the icon's tooltip says under the app's name, like the mode and
     /// battery level.
     pub fn set_status(&self, status: String) {
-        if let Some(handle) = &self.handle {
-            handle.update(|item| item.status = status);
+        if let Some(statuses) = &self.statuses {
+            let _ = statuses.send(status);
         }
     }
 

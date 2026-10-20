@@ -17,7 +17,7 @@ use std::time::Duration;
 use gpui_kit::*;
 use sc_core::{Device, ListeningMode, Mode, Setting};
 
-use crate::headset::Headset;
+use crate::headset::{Connection, Headset};
 use crate::{status, tray};
 
 /// How long the command waits for the app to answer.
@@ -80,9 +80,42 @@ fn status_command(flags: &[&str]) -> Option<String> {
     known.then(|| ["status", if json { " json" } else { "" }, if follow { " follow" } else { "" }].concat())
 }
 
-/// Asks the running app to open its panel. Fails when none is running.
-pub fn show_running() -> io::Result<()> {
-    send("show", |_| true)
+/// Whether this is the only copy of the app.
+pub enum Claim {
+    /// It is, and answers commands here (nowhere without `$XDG_RUNTIME_DIR`).
+    First(Option<UnixListener>),
+    /// Another copy is running, and has been asked to show its panel.
+    Taken,
+}
+
+/// Claims the socket before the app starts, so two copies started at once
+/// don't both run.
+pub fn claim() -> Claim {
+    let Some(path) = socket_path() else {
+        eprintln!("not listening for commands: XDG_RUNTIME_DIR isn't set");
+        return Claim::First(None);
+    };
+    let bound = UnixListener::bind(&path).or_else(|error| {
+        if error.kind() != io::ErrorKind::AddrInUse {
+            return Err(error);
+        }
+        match UnixStream::connect(&path) {
+            Ok(mut running) => {
+                let _ = writeln!(running, "show");
+                Err(io::ErrorKind::AddrInUse.into())
+            }
+            // Left behind by a copy that has quit.
+            Err(_) => std::fs::remove_file(&path).and_then(|()| UnixListener::bind(&path)),
+        }
+    });
+    match bound {
+        Ok(listener) => Claim::First(Some(listener)),
+        Err(error) if error.kind() == io::ErrorKind::AddrInUse => Claim::Taken,
+        Err(error) => {
+            eprintln!("not listening for commands on {}: {error}", path.display());
+            Claim::First(None)
+        }
+    }
 }
 
 /// Sends a command to the running app and passes on its answers until it's
@@ -131,19 +164,8 @@ struct Follower {
     last: String,
 }
 
-/// Starts answering commands. Without `$XDG_RUNTIME_DIR` there's nowhere
-/// private to listen, so other programs can't reach the app.
-pub fn serve(headset: Entity<Headset>, cx: &mut App) {
-    let Some(path) = socket_path() else {
-        return eprintln!("not listening for commands: XDG_RUNTIME_DIR isn't set");
-    };
-    // Whoever made this socket is gone: show_running() found nobody there.
-    let _ = std::fs::remove_file(&path);
-    let listener = match UnixListener::bind(&path) {
-        Ok(listener) => listener,
-        Err(error) => return eprintln!("not listening for commands on {}: {error}", path.display()),
-    };
-
+/// Starts answering commands on the socket [`claim`] got.
+pub fn serve(listener: UnixListener, headset: Entity<Headset>, cx: &mut App) {
     let (requests, received) = async_channel::unbounded();
     thread::Builder::new()
         .name("control".into())
@@ -229,7 +251,11 @@ fn tell_followers(headset: &Entity<Headset>, cx: &mut App) {
 
 /// Switches to `mode`, a mode's ID or "next", and says which mode that is.
 fn switch_mode(headset: &mut Headset, mode: &str, cx: &mut Context<Headset>) -> Result<String, String> {
-    let device = headset.device.as_ref().ok_or("No headphones are connected.")?;
+    let device = headset
+        .device
+        .as_ref()
+        .filter(|_| headset.connection == Connection::Connected)
+        .ok_or("No headphones are connected.")?;
     let target = mode_for(device, headset.mode, mode)?;
     let name = target.name.to_owned();
     headset.change(Setting::Mode(target.mode), cx);
@@ -239,6 +265,9 @@ fn switch_mode(headset: &mut Headset, mode: &str, cx: &mut Context<Headset>) -> 
 /// The mode a `mode` command asks for: one of the device's by ID, or the
 /// one after `current`.
 fn mode_for<'a>(device: &'a Device, current: Option<ListeningMode>, asked: &str) -> Result<&'a Mode, String> {
+    if device.modes.is_empty() {
+        return Err("These headphones' modes aren't known yet.".into());
+    }
     let target = match asked {
         "next" => device.mode_after(current),
         id => ListeningMode::from_id(id),

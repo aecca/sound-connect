@@ -12,8 +12,14 @@ use crate::settings::Settings;
 
 pub fn start(headset: Entity<Headset>, cx: &mut App) {
     let mut low = LowBattery::default();
+    // Which headset `low` is about: another one starts afresh.
+    let mut watching: Option<String> = None;
     cx.observe(&headset, move |headset, cx| {
         let headset = headset.read(cx);
+        if headset.name.is_some() && headset.name != watching {
+            watching.clone_from(&headset.name);
+            low = LowBattery::default();
+        }
         // Earbuds: the emptier one that isn't charging.
         let earbuds = [headset.left_battery, headset.right_battery].into_iter().flatten().filter(|b| !b.charging);
         let battery = headset.battery.or_else(|| earbuds.min_by_key(|b| b.level));
