@@ -4,6 +4,10 @@
 //! object as JSON and then each one again whenever it changes. A recording
 //! is an input stream that's running. Streams that capture what's playing
 //! (screen recorders) or only measure levels (volume meters) don't count.
+//!
+//! Some systems run PipeWire while PulseAudio plays the sound, as Ubuntu
+//! 22.04 does. PipeWire then has no audio devices and sees no recordings, so
+//! nothing is reported until it has one.
 
 use std::collections::HashSet;
 use std::io::{self, BufReader};
@@ -17,8 +21,9 @@ use serde_json::Value;
 /// restarted.
 const RESTART_AFTER: Duration = Duration::from_secs(10);
 
-/// Starts watching. The receiver gets `true` when recording starts and
-/// `false` when it stops. `None` without PipeWire.
+/// Starts watching. Once PipeWire turns out to handle the sound, the receiver
+/// gets whether something is recording, and then `true` when recording
+/// starts and `false` when it stops. `None` without PipeWire.
 pub fn watch() -> Option<async_channel::Receiver<bool>> {
     let child = spawn().inspect_err(|error| eprintln!("can't tell when the microphone is in use: {error}")).ok()?;
     let (changes, receiver) = async_channel::unbounded();
@@ -56,21 +61,32 @@ fn spawn() -> io::Result<Child> {
 fn report(child: &mut Child, changes: &async_channel::Sender<bool>) {
     let Some(stdout) = child.stdout.take() else { return };
     let mut streams = Recordings::default();
-    let mut recording = false;
+    let mut plays_sound = false;
+    // What was last reported.
+    let mut reported = None;
     for objects in serde_json::Deserializer::from_reader(BufReader::new(stdout)).into_iter::<Vec<Value>>() {
         let Ok(objects) = objects else { break };
         streams.apply(&objects);
-        if streams.any() != recording {
-            recording = !recording;
+        plays_sound |= objects.iter().any(is_audio_device);
+        let recording = streams.any();
+        if plays_sound && reported != Some(recording) {
+            reported = Some(recording);
             if changes.send_blocking(recording).is_err() {
                 return;
             }
         }
     }
     // Nothing is known to be recording once PipeWire stops saying.
-    if recording {
+    if reported == Some(true) {
         let _ = changes.send_blocking(false);
     }
+}
+
+/// A sound card, headset or the like, which PipeWire only has when it plays
+/// the sound.
+fn is_audio_device(object: &Value) -> bool {
+    let class = object["info"]["props"]["media.class"].as_str().unwrap_or_default();
+    ["Audio/Sink", "Audio/Source", "Audio/Duplex"].iter().any(|prefix| class.starts_with(prefix))
 }
 
 /// The running input streams, by PipeWire object ID.
@@ -164,6 +180,18 @@ mod tests {
             serde_json::json!({ "id": 5, "type": "PipeWire:Interface:Metadata", "metadata": [] }),
         ]);
         assert!(!recordings.any());
+    }
+
+    #[test]
+    fn knows_pipewire_plays_the_sound_once_it_has_an_audio_device() {
+        let sink = serde_json::json!({
+            "id": 30,
+            "type": "PipeWire:Interface:Node",
+            "info": { "state": "suspended", "props": { "media.class": "Audio/Sink", "node.name": "speakers" } },
+        });
+        assert!(is_audio_device(&sink));
+        assert!(!is_audio_device(&stream(42, "running", plain())));
+        assert!(!is_audio_device(&serde_json::json!({ "id": 5, "type": "PipeWire:Interface:Metadata" })));
     }
 
     #[test]

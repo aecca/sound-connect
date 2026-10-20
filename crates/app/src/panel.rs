@@ -89,6 +89,7 @@ impl Panel {
             }),
             cx.observe_global::<Updates>(|_, cx| cx.notify()),
             cx.observe_global::<Settings>(|_, cx| cx.notify()),
+            cx.observe_global::<Calls>(|_, cx| cx.notify()),
             cx.observe_window_appearance(window, |_, window, cx| {
                 Theme::sync_system_appearance(Some(window), cx);
                 cx.notify();

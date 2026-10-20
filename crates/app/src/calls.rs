@@ -11,7 +11,8 @@ use crate::headset::Headset;
 use crate::microphone;
 use crate::settings::Settings;
 
-/// Whether this computer can tell when the microphone is in use.
+/// Whether this computer can tell when the microphone is in use: once
+/// PipeWire has said what's recording.
 pub struct Calls {
     pub supported: bool,
 }
@@ -19,9 +20,8 @@ pub struct Calls {
 impl Global for Calls {}
 
 pub fn start(headset: Entity<Headset>, cx: &mut App) {
-    let changes = microphone::watch();
-    cx.set_global(Calls { supported: changes.is_some() });
-    let Some(changes) = changes else { return };
+    cx.set_global(Calls { supported: false });
+    let Some(changes) = microphone::watch() else { return };
 
     cx.spawn(async move |cx| {
         let mut calls = CallAmbience::default();
@@ -30,6 +30,9 @@ pub fn start(headset: Entity<Headset>, cx: &mut App) {
             if recording || !calls.in_call() {
                 let Ok(change) = changes.recv().await else { return };
                 recording = change;
+                if !cx.update(|cx| cx.global::<Calls>().supported) {
+                    cx.update(|cx| cx.set_global(Calls { supported: true }));
+                }
             } else {
                 // The microphone went unused during a call: look again once
                 // it's had time to settle.
