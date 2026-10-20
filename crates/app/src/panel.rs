@@ -11,7 +11,9 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use sc_core::{AutoOff, Battery, Device, ListeningMode, Setting};
 
+use crate::calls::Calls;
 use crate::headset::{Connection, Headset};
+use crate::settings::{self, Settings};
 use crate::update::{self, Status, Updates};
 
 pub const WIDTH: f32 = 300.;
@@ -84,6 +86,7 @@ impl Panel {
                 }
             }),
             cx.observe_global::<Updates>(|_, cx| cx.notify()),
+            cx.observe_global::<Settings>(|_, cx| cx.notify()),
             cx.observe_window_appearance(window, |_, window, cx| {
                 Theme::sync_system_appearance(Some(window), cx);
                 cx.notify();
@@ -197,6 +200,24 @@ impl Panel {
             })
     }
 
+    /// "Ambient Sound During Calls", when the headset has ambient sound and
+    /// this computer can tell when the microphone is in use.
+    fn calls(&self, p: Palette, cx: &App) -> Option<impl IntoElement> {
+        if !cx.global::<Calls>().supported || !self.headset.read(cx).offers(ListeningMode::Ambient) {
+            return None;
+        }
+        let on = cx.global::<Settings>().ambient_during_calls;
+        Some(toggle_row(
+            "calls",
+            "Ambient Sound During Calls",
+            Some("Hear yourself while an app uses the microphone"),
+            on,
+            false,
+            p,
+            |on, cx| settings::change(cx, |settings| settings.ambient_during_calls = on),
+        ))
+    }
+
     fn features(&self, device: &Device, p: Palette, cx: &App) -> impl IntoElement {
         let states = &self.headset.read(cx).features;
         v_flex().children(device.features.iter().filter_map(|&feature| {
@@ -259,6 +280,7 @@ impl Panel {
             .overflow_y_scroll()
             .when(!device.modes.is_empty(), |this| this.child(self.modes(device, p, cx)))
             .when_some(device.ambient.as_ref(), |this, ambient| this.child(self.ambient(ambient.focus_on_voice, p, cx)))
+            .children(self.calls(p, cx))
             .when(!device.features.is_empty(), |this| this.child(separator(p)).child(self.features(device, p, cx)))
             .when(!device.auto_off.is_empty(), |this| this.child(separator(p)).child(self.auto_off(device, p, cx)))
             .into_any_element()

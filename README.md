@@ -47,6 +47,7 @@ Sound Connect sits in your menu bar (or your system tray on Linux). Click the he
 - 🎧 Switch between **Noise Cancelling**, **Ambient Sound** and **Off**
 - 🔊 Choose how much outside sound you hear, and turn on **Focus on Voice**
 - 💬 Turn **Speak-to-Chat** on or off, the feature that lets in outside sound when you start talking
+- 📞 Switch to **Ambient Sound during calls** on its own, so you hear your own voice, and back when the call ends
 - 🎚️ Pick an **equalizer** preset, or shape your own sound
 - ✨ Turn on **DSEE Extreme** to bring back detail in compressed music
 - 🔕 Turn **voice prompts** on or off, and choose when your headphones **turn off** on their own

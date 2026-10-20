@@ -11,6 +11,7 @@ import SwiftUI
 final class StatusMenu: NSObject, NSMenuDelegate {
     private let model: HeadsetModel
     private let updater: Updater
+    private let calls: Calls
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     private let menu = NSMenu()
 
@@ -21,6 +22,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     private var levelItem: NSMenuItem?
     private var levelView: LevelSliderView?
     private var focusItem: NSMenuItem?
+    private var callsItem: NSMenuItem?
     private var featureItems: [(Feature, NSMenuItem)] = []
     private var presetItems: [(EqPreset, NSMenuItem)] = []
     private var autoOffItems: [(AutoOff, NSMenuItem)] = []
@@ -31,9 +33,10 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         case message(String, connect: [String])
     }
 
-    init(model: HeadsetModel, updater: Updater) {
+    init(model: HeadsetModel, updater: Updater, calls: Calls) {
         self.model = model
         self.updater = updater
+        self.calls = calls
         super.init()
         menu.delegate = self
         menu.autoenablesItems = false
@@ -107,6 +110,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         levelItem = nil
         levelView = nil
         focusItem = nil
+        callsItem = nil
         featureItems = []
         presetItems = []
         autoOffItems = []
@@ -194,6 +198,14 @@ final class StatusMenu: NSObject, NSMenuDelegate {
                 }
             }
         }
+
+        if Calls.isSupported, device.modes.contains(where: { $0.mode == .ambient }) {
+            let item = actionItem("Ambient Sound During Calls", #selector(toggleCalls))
+            item.image = symbol("phone.and.waveform")
+            item.toolTip = "While an app uses the microphone, as in a call, switches to Ambient Sound so you hear yourself."
+            callsItem = item
+            menu.addItem(item)
+        }
     }
 
     private func update() {
@@ -206,6 +218,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         if let level = model.ambientLevel { levelView?.level = level }
         focusItem?.isHidden = !ambient
         focusItem?.state = model.focusOnVoice == true ? .on : .off
+        callsItem?.state = calls.isOn ? .on : .off
         for (feature, item) in featureItems {
             // Hidden until the headset has reported it.
             item.isHidden = model.features[feature] == nil
@@ -267,6 +280,11 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
     @objc private func toggleFocusOnVoice() {
         model.change(.focusOnVoice(on: model.focusOnVoice != true))
+    }
+
+    @objc private func toggleCalls() {
+        calls.isOn.toggle()
+        update()
     }
 
     @objc private func toggleFeature(_ item: NSMenuItem) {

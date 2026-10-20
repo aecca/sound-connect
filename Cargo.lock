@@ -6748,6 +6748,8 @@ dependencies = [
  "objc2-app-kit 0.3.2",
  "sc-bluetooth",
  "sc-core",
+ "serde",
+ "serde_json",
  "tray-icon",
 ]
 

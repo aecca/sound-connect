@@ -6,7 +6,7 @@
 //! [`Headset`] for the device with [`headset_for`], passes it what the channel
 //! reads and writes out every frame it returns.
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Instant;
 
 use sc_core::{Battery, BatteryLayout, Brand, Driver, EqLayout, Feature, ListeningMode};
@@ -218,7 +218,26 @@ impl Headset {
 impl Headset {
     fn driver(&self) -> std::sync::MutexGuard<'_, Box<dyn Driver>> {
         // A panic while holding the lock leaves the driver as it was; keep using it.
-        self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+/// Ambient sound during calls. See `sc_core::CallAmbience`.
+#[derive(Default, uniffi::Object)]
+pub struct CallAmbience(Mutex<sc_core::CallAmbience>);
+
+#[uniffi::export]
+impl CallAmbience {
+    #[uniffi::constructor]
+    pub fn new() -> Arc<Self> {
+        Arc::default()
+    }
+
+    /// Call every second or so with whether any other app is recording and
+    /// the headset's mode (`None` without ambient sound). Returns the mode to
+    /// switch the headset to, if any.
+    pub fn update(&self, recording: bool, mode: Option<ListeningMode>) -> Option<ListeningMode> {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner).update(recording, mode, Instant::now())
     }
 }
 

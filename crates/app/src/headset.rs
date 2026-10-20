@@ -78,6 +78,11 @@ impl Headset {
         }
     }
 
+    /// Whether the headset has this listening mode.
+    pub fn offers(&self, mode: ListeningMode) -> bool {
+        self.device.as_ref().is_some_and(|device| device.modes.iter().any(|offered| offered.mode == mode))
+    }
+
     /// Applies a change the user made and sends it to the headset, unless
     /// nothing actually changed (a slider reports every position).
     pub fn change(&mut self, setting: Setting, cx: &mut Context<Self>) {

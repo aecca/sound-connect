@@ -6,6 +6,7 @@
 //! [`driver_for`] and moves bytes between the two. Apps work with the
 //! brand-neutral [`Device`], [`Update`] and [`Setting`].
 
+pub mod calls;
 pub mod device;
 pub mod driver;
 pub mod drivers;
@@ -13,6 +14,7 @@ pub mod equalizer;
 mod queue;
 pub mod registry;
 
+pub use calls::CallAmbience;
 pub use device::{
     Ambient, AutoOff, Battery, BatteryLayout, Brand, Device, Feature, ListeningMode, Mode, Setting, Update,
 };

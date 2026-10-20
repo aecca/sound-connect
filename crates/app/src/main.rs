@@ -1,9 +1,12 @@
 //! Sound Connect: control Sony and Bose headphones from the menu bar.
 
 mod assets;
+mod calls;
 mod headset;
 mod icon;
+mod microphone;
 mod panel;
+mod settings;
 mod tray;
 mod update;
 
@@ -40,7 +43,9 @@ fn main() {
         })
         .detach();
 
+        cx.set_global(settings::Settings::load());
         tray::install(headset.clone(), cx);
+        calls::start(headset.clone(), cx);
         update::start(cx);
 
         // Development aid: open the panel right away, e.g. to screenshot it.
