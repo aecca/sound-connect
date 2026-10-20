@@ -15,7 +15,9 @@ final class BatteryAlerts: NSObject, UNUserNotificationCenterDelegate {
     }
 
     private let model: HeadsetModel
-    private let low = LowBattery()
+    private var low = LowBattery()
+    /// Which headset `low` is about: another one starts afresh.
+    private var watching: String?
 
     init(model: HeadsetModel) {
         self.model = model
@@ -35,6 +37,10 @@ final class BatteryAlerts: NSObject, UNUserNotificationCenterDelegate {
     }
 
     private func check() {
+        if let name = model.name, name != watching {
+            watching = name
+            low = LowBattery()
+        }
         // Earbuds: the emptier one that isn't charging.
         let earbuds = [model.leftBattery, model.rightBattery].compactMap { $0 }.filter { !$0.charging }
         guard let battery = model.battery ?? earbuds.min(by: { $0.level < $1.level }),
