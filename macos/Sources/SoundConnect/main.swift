@@ -16,7 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let sample = Snapshots.sampleModel()
             let menu = StatusMenu(
                 model: sample, updater: updater, calls: Calls(model: sample), shortcut: ModeShortcut(model: sample),
-                batteryAlerts: BatteryAlerts(model: sample))
+                batteryAlerts: BatteryAlerts(model: sample), popUp: ModePopUp(model: sample))
             self.menu = menu
             Snapshots.take(menu: menu, model: sample, into: folder)
             return
@@ -25,7 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         link = HeadsetLink(model: model)
         menu = StatusMenu(
             model: model, updater: updater, calls: Calls(model: model), shortcut: ModeShortcut(model: model),
-            batteryAlerts: BatteryAlerts(model: model))
+            batteryAlerts: BatteryAlerts(model: model), popUp: ModePopUp(model: model))
         updater.start()
     }
 

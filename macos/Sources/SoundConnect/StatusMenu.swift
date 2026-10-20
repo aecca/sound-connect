@@ -6,26 +6,33 @@ import SwiftUI
 
 /// The menu bar icon and its menu, laid out like the AirPods section of the
 /// macOS Bluetooth menu. Which items it has comes from the headset's
-/// `Device`, so it works for any brand.
+/// `Device`, so it works for any brand. What's used most sits at the top;
+/// the rest is in "Headphone Settings" and "Sound Connect Settings".
 @MainActor
 final class StatusMenu: NSObject, NSMenuDelegate {
+    /// Kept in the menu itself; the others go in "Headphone Settings".
+    private static let mainFeatures: [Feature] = [.speakToChat, .dsee]
+
     private let model: HeadsetModel
     private let updater: Updater
     private let calls: Calls
     private let shortcut: ModeShortcut
     private let batteryAlerts: BatteryAlerts
+    private let popUp: ModePopUp
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     private let menu = NSMenu()
 
     /// What the menu was last built for; anything else is updated in place,
     /// so an open menu (and a slider being dragged) is never rebuilt.
     private var builtFor: Layout?
-    private var modeItems: [(ListeningMode, NSMenuItem)] = []
     private var levelItem: NSMenuItem?
     private var levelView: LevelSliderView?
     private var focusItem: NSMenuItem?
-    private var callsItem: NSMenuItem?
+    private var focusRow: SwitchRowView?
+    private var callsRow: SwitchRowView?
     private var featureItems: [(Feature, NSMenuItem)] = []
+    private var equalizerItem: NSMenuItem?
+    private var headphoneSettingsItem: NSMenuItem?
     private var chatOptionsItem: NSMenuItem?
     private var sensitivityItems: [(VoiceSensitivity, NSMenuItem)] = []
     private var chatEndItems: [(SpeakToChatEnd, NSMenuItem)] = []
@@ -40,6 +47,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     private var shortcutItem: NSMenuItem?
     private var batteryAlertsItem: NSMenuItem?
     private var batteryInMenuBarItem: NSMenuItem?
+    private var popUpItem: NSMenuItem?
     /// Shows the battery level next to the icon. Off at first: it makes the
     /// icon wider, and macOS hides icons that don't fit beside the notch.
     private var showsBattery = UserDefaults.standard.bool(forKey: StatusMenu.showsBatteryKey) {
@@ -53,12 +61,16 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         case message(String, connect: [String])
     }
 
-    init(model: HeadsetModel, updater: Updater, calls: Calls, shortcut: ModeShortcut, batteryAlerts: BatteryAlerts) {
+    init(
+        model: HeadsetModel, updater: Updater, calls: Calls, shortcut: ModeShortcut, batteryAlerts: BatteryAlerts,
+        popUp: ModePopUp
+    ) {
         self.model = model
         self.updater = updater
         self.calls = calls
         self.shortcut = shortcut
         self.batteryAlerts = batteryAlerts
+        self.popUp = popUp
         super.init()
         menu.delegate = self
         menu.autoenablesItems = false
@@ -90,6 +102,15 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         guard let screen = NSScreen.main else { return }
         let left = screen.auxiliaryTopRightArea?.minX ?? screen.frame.maxX - menu.size.width - 8
         menu.popUp(positioning: nil, at: NSPoint(x: left, y: screen.visibleFrame.maxY), in: nil)
+    }
+
+    // Changes made while the menu is open show in it; the pop-up is for the rest.
+    func menuWillOpen(_ menu: NSMenu) {
+        popUp.menuIsOpen = true
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        popUp.menuIsOpen = false
     }
 
     // MARK: Building
@@ -136,12 +157,14 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     private func build(_ layout: Layout) {
         builtFor = layout
         menu.removeAllItems()
-        modeItems = []
         levelItem = nil
         levelView = nil
         focusItem = nil
-        callsItem = nil
+        focusRow = nil
+        callsRow = nil
         featureItems = []
+        equalizerItem = nil
+        headphoneSettingsItem = nil
         chatOptionsItem = nil
         sensitivityItems = []
         chatEndItems = []
@@ -153,13 +176,11 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         noiseButtonItem = nil
         noiseButtonItems = []
 
-        // Views inside menus need a real frame; SwiftUI sizes the header itself.
-        let header = NSHostingView(rootView: HeaderView(model: model, updater: updater) { [weak self] in
+        // Views inside menus need a real frame; SwiftUI sizes them itself.
+        menu.addItem(hostingItem(HeaderView(model: model, updater: updater) { [weak self] in
             self?.menu.cancelTracking()
             self?.updater.install()
-        })
-        header.frame = NSRect(origin: .zero, size: header.fittingSize)
-        menu.addItem(viewItem(header))
+        }))
         menu.addItem(.separator())
 
         switch layout {
@@ -176,107 +197,137 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
         case .controls(let device):
             addModes(of: device)
-            if !device.features.isEmpty {
+            let features = device.features.filter(Self.mainFeatures.contains)
+            if !features.isEmpty || device.equalizer != nil {
                 menu.addItem(.separator())
-                for feature in device.features {
-                    let item = actionItem(featureName(feature: feature), #selector(toggleFeature(_:)))
-                    item.representedObject = feature
-                    item.image = symbol(Self.icon(for: feature))
-                    item.toolTip = featureDescription(feature: feature)
-                    menu.addItem(item)
-                    featureItems.append((feature, item))
-                    // Its options sit right under it, like Ambient Sound's.
-                    if feature == .speakToChat, device.speakToChatOptions {
-                        let options = NSMenuItem(title: "Speak-to-Chat Options", action: nil, keyEquivalent: "")
-                        options.indentationLevel = 1
-                        options.submenu = speakToChatMenu()
-                        chatOptionsItem = options
-                        menu.addItem(options)
-                    }
-                }
+            }
+            for feature in features {
+                menu.addItem(featureItem(feature))
             }
             if device.equalizer != nil {
-                menu.addItem(.separator())
                 let item = NSMenuItem(title: "Equalizer", action: nil, keyEquivalent: "")
                 item.image = symbol("slider.vertical.3")
                 item.submenu = equalizerMenu()
+                equalizerItem = item
                 menu.addItem(item)
             }
-            if !device.autoOff.isEmpty {
-                let item = NSMenuItem(title: "Turn Off Automatically", action: nil, keyEquivalent: "")
-                item.image = symbol("moon.zzz")
-                item.submenu = autoOffMenu(device.autoOff)
-                autoOffItem = item
-                menu.addItem(item)
-            }
-            if !device.noiseButton.isEmpty {
-                let item = NSMenuItem(title: "Noise Control Button", action: nil, keyEquivalent: "")
-                item.image = symbol("button.horizontal.top.press")
-                item.toolTip = "What the button on your headphones switches between"
-                item.submenu = noiseButtonMenu(device.noiseButton)
-                noiseButtonItem = item
-                menu.addItem(item)
-            }
-            // Which of the devices the headset is connected to it plays; shown
-            // once it's connected to more than this Mac.
-            let playFrom = NSMenuItem(title: "Play Audio From", action: nil, keyEquivalent: "")
-            playFrom.image = symbol("laptopcomputer.and.iphone")
-            playFrom.submenu = NSMenu()
-            playFrom.submenu?.autoenablesItems = false
-            playFromItem = playFrom
-            menu.addItem(playFrom)
+            menu.addItem(.separator())
+            let settings = NSMenuItem(title: "Headphone Settings", action: nil, keyEquivalent: "")
+            settings.image = symbol("headphones")
+            settings.submenu = headphoneSettingsMenu(device)
+            headphoneSettingsItem = settings
+            menu.addItem(settings)
         }
 
         menu.addItem(.separator())
-        shortcutItem = actionItem(ModeShortcut.title, #selector(toggleShortcut))
-        shortcutItem?.toolTip = "Press Control-Option-Command-N in any app to switch to the next mode."
-        menu.addItem(shortcutItem!)
-        batteryInMenuBarItem = actionItem("Show Battery in Menu Bar", #selector(toggleBatteryInMenuBar))
-        menu.addItem(batteryInMenuBarItem!)
-        batteryAlertsItem = actionItem("Low Battery Alerts", #selector(toggleBatteryAlerts))
-        batteryAlertsItem?.toolTip = "A notification when the battery is down to 20%, and again at 10%."
-        menu.addItem(batteryAlertsItem!)
-        openAtLoginItem = actionItem("Open at Login", #selector(toggleOpenAtLogin))
-        menu.addItem(openAtLoginItem!)
+        let appSettings = NSMenuItem(title: "Sound Connect Settings", action: nil, keyEquivalent: "")
+        appSettings.image = symbol("gearshape")
+        appSettings.submenu = appSettingsMenu()
+        menu.addItem(appSettings)
         menu.addItem(actionItem("Quit Sound Connect", #selector(quit), key: "q"))
     }
 
     private func addModes(of device: Device) {
         guard !device.modes.isEmpty else { return }
-        menu.addItem(.sectionHeader(title: "Noise Control"))
-        for mode in device.modes {
-            let item = actionItem(mode.name, #selector(selectMode(_:)))
-            item.representedObject = mode.mode
-            item.image = symbol(Self.icon(for: mode.mode))
-            menu.addItem(item)
-            modeItems.append((mode.mode, item))
+        menu.addItem(hostingItem(ModeButtons(model: model)))
 
-            // Ambient options sit right under their mode, shown while it's on.
-            if mode.mode == .ambient, let ambient = device.ambient {
-                let slider = LevelSliderView(range: ambient.minLevel...ambient.maxLevel) { [weak self] level in
-                    self?.model.change(.ambientLevel(level: level))
-                }
-                levelView = slider
-                let levelItem = viewItem(slider)
-                self.levelItem = levelItem
-                menu.addItem(levelItem)
+        // Ambient options sit right under the buttons, shown while it's on.
+        if let ambient = device.ambient {
+            let slider = LevelSliderView(range: ambient.minLevel...ambient.maxLevel) { [weak self] level in
+                self?.model.change(.ambientLevel(level: level))
+            }
+            levelView = slider
+            let levelItem = viewItem(slider)
+            self.levelItem = levelItem
+            menu.addItem(levelItem)
 
-                if ambient.focusOnVoice {
-                    let focusItem = actionItem("Focus on Voice", #selector(toggleFocusOnVoice))
-                    focusItem.indentationLevel = 1
-                    self.focusItem = focusItem
-                    menu.addItem(focusItem)
+            if ambient.focusOnVoice {
+                let row = SwitchRowView(title: "Focus on Voice") { [weak self] on in
+                    self?.model.change(.focusOnVoice(on: on))
                 }
+                focusRow = row
+                let focusItem = viewItem(row)
+                self.focusItem = focusItem
+                menu.addItem(focusItem)
             }
         }
 
         if Calls.isSupported, device.modes.contains(where: { $0.mode == .ambient }) {
-            let item = actionItem("Ambient Sound During Calls", #selector(toggleCalls))
-            item.image = symbol("phone.and.waveform")
-            item.toolTip = "While an app uses the microphone, as in a call, switches to Ambient Sound so you hear yourself."
-            callsItem = item
-            menu.addItem(item)
+            let row = SwitchRowView(
+                title: "Ambient Sound During Calls",
+                toolTip: "While an app uses the microphone, as in a call, switches to Ambient Sound so you hear yourself."
+            ) { [weak self] on in
+                self?.calls.isOn = on
+            }
+            callsRow = row
+            menu.addItem(viewItem(row))
         }
+    }
+
+    /// Settings changed now and then: the rest of the features, how they
+    /// behave, and turning the headphones off.
+    private func headphoneSettingsMenu(_ device: Device) -> NSMenu {
+        let submenu = NSMenu()
+        submenu.autoenablesItems = false
+        for feature in device.features where !Self.mainFeatures.contains(feature) {
+            submenu.addItem(featureItem(feature))
+        }
+        if device.features.contains(.speakToChat), device.speakToChatOptions {
+            let item = NSMenuItem(title: "Speak-to-Chat Options", action: nil, keyEquivalent: "")
+            item.image = symbol(Self.icon(for: .speakToChat))
+            item.submenu = speakToChatMenu()
+            chatOptionsItem = item
+            submenu.addItem(item)
+        }
+        if !device.autoOff.isEmpty {
+            let item = NSMenuItem(title: "Turn Off Automatically", action: nil, keyEquivalent: "")
+            item.image = symbol("moon.zzz")
+            item.submenu = autoOffMenu(device.autoOff)
+            autoOffItem = item
+            submenu.addItem(item)
+        }
+        if !device.noiseButton.isEmpty {
+            let item = NSMenuItem(title: "Noise Control Button", action: nil, keyEquivalent: "")
+            item.image = symbol("button.horizontal.top.press")
+            item.toolTip = "What the button on your headphones switches between"
+            item.submenu = noiseButtonMenu(device.noiseButton)
+            noiseButtonItem = item
+            submenu.addItem(item)
+        }
+        // Which of the devices the headset is connected to it plays; shown
+        // once it's connected to more than this Mac.
+        let playFrom = NSMenuItem(title: "Play Audio From", action: nil, keyEquivalent: "")
+        playFrom.image = symbol("laptopcomputer.and.iphone")
+        playFrom.submenu = NSMenu()
+        playFrom.submenu?.autoenablesItems = false
+        playFromItem = playFrom
+        submenu.addItem(playFrom)
+        if device.powerOff {
+            submenu.addItem(.separator())
+            let item = actionItem("Turn Off Headphones…", #selector(powerOff))
+            item.image = symbol("power")
+            submenu.addItem(item)
+        }
+        return submenu
+    }
+
+    private func appSettingsMenu() -> NSMenu {
+        let submenu = NSMenu()
+        submenu.autoenablesItems = false
+        shortcutItem = actionItem(ModeShortcut.title, #selector(toggleShortcut))
+        shortcutItem?.toolTip = "Press Control-Option-Command-N in any app to switch to the next mode."
+        submenu.addItem(shortcutItem!)
+        batteryInMenuBarItem = actionItem("Show Battery in Menu Bar", #selector(toggleBatteryInMenuBar))
+        submenu.addItem(batteryInMenuBarItem!)
+        batteryAlertsItem = actionItem("Low Battery Alerts", #selector(toggleBatteryAlerts))
+        batteryAlertsItem?.toolTip = "A notification when the battery is down to 20%, and again at 10% and 5%."
+        submenu.addItem(batteryAlertsItem!)
+        popUpItem = actionItem(ModePopUp.title, #selector(togglePopUp))
+        popUpItem?.toolTip = "Shows the new mode when you change it with the button on your headphones or a shortcut."
+        submenu.addItem(popUpItem!)
+        openAtLoginItem = actionItem("Open at Login", #selector(toggleOpenAtLogin))
+        submenu.addItem(openAtLoginItem!)
+        return submenu
     }
 
     private func update() {
@@ -284,20 +335,19 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         shortcutItem?.state = shortcut.isOn ? .on : .off
         batteryAlertsItem?.state = batteryAlerts.isOn ? .on : .off
         batteryInMenuBarItem?.state = showsBattery ? .on : .off
-        for (mode, item) in modeItems {
-            item.state = model.mode == mode ? .on : .off
-        }
+        popUpItem?.state = popUp.isOn ? .on : .off
         let ambient = model.mode == .ambient
         levelItem?.isHidden = !ambient
         if let level = model.ambientLevel { levelView?.level = level }
         focusItem?.isHidden = !ambient
-        focusItem?.state = model.focusOnVoice == true ? .on : .off
-        callsItem?.state = calls.isOn ? .on : .off
+        focusRow?.isOn = model.focusOnVoice == true
+        callsRow?.isOn = calls.isOn
         for (feature, item) in featureItems {
             // Hidden until the headset has reported it.
             item.isHidden = model.features[feature] == nil
             item.state = model.features[feature] == true ? .on : .off
         }
+        equalizerItem?.badge = model.equalizer.map { NSMenuItemBadge(string: eqPresetName(preset: $0.preset)) }
         chatOptionsItem?.isHidden = model.voiceSensitivity == nil || model.features[.speakToChat] != true
         for (sensitivity, item) in sensitivityItems {
             item.state = model.voiceSensitivity == sensitivity ? .on : .off
@@ -318,6 +368,22 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         for (choice, item) in noiseButtonItems {
             item.state = model.noiseButton == choice ? .on : .off
         }
+        if let headphoneSettingsItem, let submenu = headphoneSettingsItem.submenu {
+            let items = submenu.items.filter { !$0.isSeparatorItem }
+            headphoneSettingsItem.isHidden = items.allSatisfy(\.isHidden)
+            // "Turn Off Headphones…" is set apart, unless it's alone.
+            let separator = submenu.items.first(where: \.isSeparatorItem)
+            separator?.isHidden = items.dropLast().allSatisfy(\.isHidden)
+        }
+    }
+
+    private func featureItem(_ feature: Feature) -> NSMenuItem {
+        let item = actionItem(featureName(feature: feature), #selector(toggleFeature(_:)))
+        item.representedObject = feature
+        item.image = symbol(Self.icon(for: feature))
+        item.toolTip = featureDescription(feature: feature)
+        featureItems.append((feature, item))
+        return item
     }
 
     private func equalizerMenu() -> NSMenu {
@@ -418,19 +484,6 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
     // MARK: Actions
 
-    @objc private func selectMode(_ item: NSMenuItem) {
-        if let mode = item.representedObject as? ListeningMode { model.change(.mode(mode: mode)) }
-    }
-
-    @objc private func toggleFocusOnVoice() {
-        model.change(.focusOnVoice(on: model.focusOnVoice != true))
-    }
-
-    @objc private func toggleCalls() {
-        calls.isOn.toggle()
-        update()
-    }
-
     @objc private func toggleFeature(_ item: NSMenuItem) {
         guard let feature = item.representedObject as? Feature else { return }
         model.change(.feature(feature: feature, on: model.features[feature] != true))
@@ -466,6 +519,19 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         EqualizerWindow.show(model: model)
     }
 
+    /// Asks first: the headphones stop playing everywhere, and only their
+    /// own power button turns them on again.
+    @objc private func powerOff() {
+        NSApp.activate()
+        let alert = NSAlert()
+        alert.messageText = "Turn off \(model.name ?? "your headphones")?"
+        alert.informativeText =
+            "They'll stop playing on every device they're connected to. To use them again, turn them on with their power button."
+        alert.addButton(withTitle: "Turn Off")
+        alert.addButton(withTitle: "Cancel")
+        if alert.runModal() == .alertFirstButtonReturn { model.change(.powerOff) }
+    }
+
     @objc private func connectHeadset(_ item: NSMenuItem) {
         if let name = item.representedObject as? String { model.connect(name) }
     }
@@ -486,6 +552,11 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         update()
     }
 
+    @objc private func togglePopUp() {
+        popUp.isOn.toggle()
+        update()
+    }
+
     @objc private func toggleOpenAtLogin() {
         LoginItem.set(SMAppService.mainApp.status != .enabled)
         update()
@@ -496,16 +567,6 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     }
 
     // MARK: Helpers
-
-    private static func icon(for mode: ListeningMode) -> String {
-        switch mode {
-        case .off: "person.crop.circle"
-        case .ambient: "person.wave.2"
-        case .noiseCancelling: "person.crop.circle.fill"
-        case .noiseCancellingLow: "person.crop.circle.badge.minus"
-        case .windReduction: "wind"
-        }
-    }
 
     private static func icon(for feature: Feature) -> String {
         switch feature {
@@ -529,9 +590,28 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         return item
     }
 
+    private func hostingItem(_ view: some View) -> NSMenuItem {
+        let host = NSHostingView(rootView: view)
+        host.frame = NSRect(origin: .zero, size: host.fittingSize)
+        return viewItem(host)
+    }
+
     private func symbol(_ name: String) -> NSImage? {
         NSImage(systemSymbolName: name, accessibilityDescription: nil)?
             .withSymbolConfiguration(.init(pointSize: 15, weight: .regular))
+    }
+}
+
+extension ListeningMode {
+    /// Its symbol, in the style of the AirPods noise control icons.
+    var symbol: String {
+        switch self {
+        case .off: "person.crop.circle"
+        case .ambient: "person.wave.2"
+        case .noiseCancelling: "person.crop.circle.fill"
+        case .noiseCancellingLow: "person.crop.circle.badge.minus"
+        case .windReduction: "wind"
+        }
     }
 }
 
@@ -558,16 +638,16 @@ private struct HeaderView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Spacer(minLength: 16)
+            Spacer(minLength: 12)
 
             if let battery = model.battery {
-                BatteryLabel(title: nil, battery: battery)
+                BatteryRing(title: nil, battery: battery)
             }
             // Earbuds: each side and the case, like the AirPods header.
             HStack(spacing: 8) {
-                if let left = model.leftBattery { BatteryLabel(title: "L", battery: left) }
-                if let right = model.rightBattery { BatteryLabel(title: "R", battery: right) }
-                if let charging = model.caseBattery { BatteryLabel(title: "Case", battery: charging) }
+                if let left = model.leftBattery { BatteryRing(title: "L", battery: left) }
+                if let right = model.rightBattery { BatteryRing(title: "R", battery: right) }
+                if let charging = model.caseBattery { BatteryRing(title: "Case", battery: charging) }
             }
 
             switch updater.status {
@@ -618,41 +698,82 @@ private struct PillButtonStyle: ButtonStyle {
     }
 }
 
-/// A battery level with the system's battery symbol, optionally titled
-/// ("L", "R", "Case") for earbuds.
-private struct BatteryLabel: View {
+/// A battery level as a ring that empties, with the level under it, like the
+/// Batteries widget; titled ("L", "R", "Case") for earbuds.
+private struct BatteryRing: View {
     let title: String?
     let battery: Battery
 
     var body: some View {
-        HStack(spacing: 4) {
+        VStack(spacing: 2) {
+            ZStack {
+                Circle().stroke(Color.primary.opacity(0.15), lineWidth: 3)
+                Circle()
+                    .trim(from: 0, to: CGFloat(battery.level) / 100)
+                    .stroke(color, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                if battery.charging {
+                    Image(systemName: "bolt.fill").font(.system(size: 9)).foregroundStyle(color)
+                }
+            }
+            .frame(width: 22, height: 22)
             Text([title, "\(battery.level)%"].compactMap { $0 }.joined(separator: " "))
-                .font(.system(size: title == nil ? 13 : 11))
+                .font(.system(size: 10).monospacedDigit())
                 .foregroundStyle(.secondary)
-            Image(systemName: batterySymbol(battery))
-                .font(.system(size: title == nil ? 15 : 12))
-                .foregroundStyle(battery.charging ? .green : battery.level <= 20 ? .red : .secondary)
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+            [title.map { "\($0) battery" } ?? "Battery", "\(battery.level)%", battery.charging ? "charging" : nil]
+                .compactMap { $0 }
+                .joined(separator: ", "))
     }
 
-    private func batterySymbol(_ battery: Battery) -> String {
-        if battery.charging { return "battery.100percent.bolt" }
-        switch battery.level {
-        case ..<13: return "battery.0percent"
-        case ..<38: return "battery.25percent"
-        case ..<63: return "battery.50percent"
-        case ..<88: return "battery.75percent"
-        default: return "battery.100percent"
-        }
+    private var color: Color {
+        !battery.charging && battery.level <= 20 ? .red : .green
     }
 }
 
-/// The "Ambient Sound Level" row: a label and a slider, like the volume
-/// slider in the Sound menu.
+/// The listening modes as buttons side by side, like the noise control in
+/// Control Center's AirPods module; the one that's on is filled.
+private struct ModeButtons: View {
+    let model: HeadsetModel
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(model.device?.modes ?? [], id: \.mode) { mode in
+                let isOn = model.mode == mode.mode
+                Button {
+                    model.change(.mode(mode: mode.mode))
+                } label: {
+                    VStack(spacing: 3) {
+                        Image(systemName: mode.mode.symbol).font(.system(size: 16))
+                        Text(mode.name)
+                            .font(.system(size: 10.5))
+                            .lineLimit(2)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 6)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 50)
+                    .foregroundStyle(isOn ? Color.white : Color.primary)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10).fill(isOn ? Color.accentColor : Color.primary.opacity(0.08)))
+                    .contentShape(RoundedRectangle(cornerRadius: 10))
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(isOn ? .isSelected : [])
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
+        .frame(width: 290)
+    }
+}
+
+/// The "Ambient Sound" row: its name and level, and a slider, like the
+/// volume slider in the Sound menu.
 private final class LevelSliderView: NSView {
-    /// Lines up with the indented "Focus on Voice" item below it.
-    private static let indent: CGFloat = 62
     private let slider: NSSlider
+    private let value = NSTextField(labelWithString: "")
     private let onChange: (UInt8) -> Void
 
     var level: UInt8 {
@@ -660,6 +781,7 @@ private final class LevelSliderView: NSView {
         set {
             // Don't fight the user's finger while they drag.
             if NSEvent.pressedMouseButtons == 0 { slider.integerValue = Int(newValue) }
+            value.stringValue = "\(slider.integerValue)"
         }
     }
 
@@ -670,22 +792,25 @@ private final class LevelSliderView: NSView {
             target: nil, action: nil)
         super.init(frame: NSRect(x: 0, y: 0, width: 290, height: 46))
 
-        let label = NSTextField(labelWithString: "Ambient Sound Level")
+        let label = NSTextField(labelWithString: "Ambient Sound")
         label.font = .menuFont(ofSize: 0)
         label.textColor = .secondaryLabelColor
+        value.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
         slider.isContinuous = true
         slider.target = self
         slider.action = #selector(changed)
 
-        for view in [label, slider] {
+        for view in [label, value, slider] {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
         }
         NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.indent),
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
             label.topAnchor.constraint(equalTo: topAnchor, constant: 4),
-            slider.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.indent),
-            slider.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+            value.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
+            value.firstBaselineAnchor.constraint(equalTo: label.firstBaselineAnchor),
+            slider.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
+            slider.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
             slider.topAnchor.constraint(equalTo: label.bottomAnchor, constant: 4),
         ])
     }
@@ -693,6 +818,48 @@ private final class LevelSliderView: NSView {
     required init?(coder: NSCoder) { fatalError("not used") }
 
     @objc private func changed() {
+        value.stringValue = "\(slider.integerValue)"
         onChange(UInt8(slider.integerValue))
+    }
+}
+
+/// A setting with a switch at the end of its row, like Wi-Fi's in the Wi-Fi
+/// menu.
+private final class SwitchRowView: NSView {
+    private let toggle = NSSwitch()
+    private let onChange: (Bool) -> Void
+
+    var isOn: Bool {
+        get { toggle.state == .on }
+        set { toggle.state = newValue ? .on : .off }
+    }
+
+    init(title: String, toolTip: String? = nil, onChange: @escaping (Bool) -> Void) {
+        self.onChange = onChange
+        super.init(frame: NSRect(x: 0, y: 0, width: 290, height: 26))
+        self.toolTip = toolTip
+
+        let label = NSTextField(labelWithString: title)
+        label.font = .menuFont(ofSize: 0)
+        toggle.controlSize = .mini
+        toggle.target = self
+        toggle.action = #selector(changed)
+
+        for view in [label, toggle] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(view)
+        }
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor),
+            toggle.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
+            toggle.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    @objc private func changed() {
+        onChange(isOn)
     }
 }
