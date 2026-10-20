@@ -5,7 +5,7 @@
 //! checked against a WH-1000XM5. Layouts only other models use are marked as
 //! such and haven't been tried on hardware by this project.
 
-use crate::device::{AutoOff, Battery, ListeningMode};
+use crate::device::{AutoOff, Battery, ListeningMode, NoiseButton};
 use crate::equalizer::{EqBands, EqLayout, EqPreset, Equalizer};
 
 /// How a headset lays out its noise-control message. Read from its replies
@@ -57,6 +57,8 @@ pub(super) enum Request {
     AutoOff,
     /// One of [`auto_off_choices`].
     SetAutoOff(AutoOff),
+    NoiseButton,
+    SetNoiseButton(NoiseButton),
 }
 
 /// What the headset sent.
@@ -82,6 +84,7 @@ pub(super) enum Reply {
     Dsee(bool),
     PauseWhenTakenOff(bool),
     AutoOff(AutoOff),
+    NoiseButton(NoiseButton),
 }
 
 /// Noise-control "inquired type" used by v2 headsets. 0x15 gets no reply on
@@ -97,6 +100,8 @@ const PAUSE_WHEN_TAKEN_OFF: u8 = 0x01;
 const AUTO_OFF_WEARING: u8 = 0x05;
 /// Its choices, as Sony's app offers them, and the two bytes each is sent as.
 const AUTO_OFF_CODES: [(AutoOff, [u8; 2]); 2] = [(AutoOff::WhenTakenOff, [0x10, 0x00]), (AutoOff::Never, [0x11, 0x00])];
+/// What the NC/AMB button switches between, among the noise-control settings.
+const NOISE_BUTTON: u8 = 0x30;
 /// Five-band equalizer values are sent offset by 10, so -10..=10 becomes 0..=20.
 const EQ_OFFSET: i8 = 10;
 /// Battery "inquired types".
@@ -144,6 +149,8 @@ impl Request {
                     .expect("only offered choices are sent");
                 vec![0x28, AUTO_OFF_WEARING, code[0], code[1]]
             }
+            Self::NoiseButton => vec![0x66, NOISE_BUTTON],
+            Self::SetNoiseButton(choice) => vec![0x68, NOISE_BUTTON, noise_button_code(*choice)],
         }
     }
 }
@@ -205,6 +212,16 @@ fn preset_from_code(code: u8) -> EqPreset {
     EqPreset::ALL.into_iter().find(|preset| preset_code(*preset) == code).unwrap_or(EqPreset::Unknown(code))
 }
 
+/// 0x00 would make the button do nothing, which isn't offered.
+fn noise_button_code(choice: NoiseButton) -> u8 {
+    match choice {
+        NoiseButton::NoiseCancellingAmbientOff => 0x01,
+        NoiseButton::NoiseCancellingAmbient => 0x02,
+        NoiseButton::NoiseCancellingOff => 0x03,
+        NoiseButton::AmbientOff => 0x04,
+    }
+}
+
 fn codec_name(code: u8) -> String {
     match code {
         0x01 => "SBC".into(),
@@ -247,6 +264,9 @@ pub(super) fn parse(p: &[u8]) -> Option<Reply> {
         })),
         0xf7 | 0xf9 if p.len() >= 3 && p[1] == SPEAK_TO_CHAT => Some(Reply::SpeakToChat(p[2] == 0x00)),
         0xf7 | 0xf9 if p.len() == 3 && p[1] == PAUSE_WHEN_TAKEN_OFF => Some(Reply::PauseWhenTakenOff(p[2] == 0x00)),
+        0x67 | 0x69 if p.len() == 3 && p[1] == NOISE_BUTTON => {
+            NoiseButton::ALL.into_iter().find(|&choice| noise_button_code(choice) == p[2]).map(Reply::NoiseButton)
+        }
         0x27 | 0x29 if p.len() >= 3 && p[1] == AUTO_OFF_WEARING => {
             AUTO_OFF_CODES.iter().find(|(_, code)| code[0] == p[2]).map(|(choice, _)| Reply::AutoOff(*choice))
         }
@@ -382,6 +402,18 @@ mod tests {
         assert_eq!(Request::SetAutoOff(AutoOff::WhenTakenOff).payload(), [0x28, 0x05, 0x10, 0x00]);
         assert_eq!(Request::SetAutoOff(AutoOff::Never).payload(), [0x28, 0x05, 0x11, 0x00]);
         assert_eq!(auto_off_choices(), [AutoOff::WhenTakenOff, AutoOff::Never]);
+    }
+
+    // Layout per SonyHeadphonesClient, whose users run it on WH-1000XM5 and XM6;
+    // Gadgetbridge has the same choice codes.
+    #[test]
+    fn encodes_and_parses_the_noise_control_button() {
+        assert_eq!(Request::NoiseButton.payload(), [0x66, 0x30]);
+        assert_eq!(Request::SetNoiseButton(NoiseButton::NoiseCancellingAmbient).payload(), [0x68, 0x30, 0x02]);
+        assert_eq!(parse(&[0x67, 0x30, 0x01]), Some(Reply::NoiseButton(NoiseButton::NoiseCancellingAmbientOff)));
+        assert_eq!(parse(&[0x69, 0x30, 0x04]), Some(Reply::NoiseButton(NoiseButton::AmbientOff)));
+        // A button that does nothing isn't one of the choices.
+        assert_eq!(parse(&[0x67, 0x30, 0x00]), None);
     }
 
     #[test]

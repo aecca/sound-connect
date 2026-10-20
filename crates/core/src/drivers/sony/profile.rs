@@ -6,7 +6,7 @@
 //! `tested` have been tried on real hardware by this project.
 
 use super::command::{Request, auto_off_choices};
-use crate::device::{Ambient, BatteryLayout, Brand, Device, Feature, ListeningMode, Mode};
+use crate::device::{Ambient, BatteryLayout, Brand, Device, Feature, ListeningMode, Mode, NoiseButton};
 use crate::equalizer::EqLayout;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -22,6 +22,8 @@ pub(super) struct Profile {
     /// Knows when it's worn: it can pause when taken off, and turn off a while
     /// after.
     pub wear_sensor: bool,
+    /// What its NC/AMB button switches between can be changed.
+    pub noise_button: bool,
 }
 
 /// Headsets that aren't in the list get the WH-1000XM5's feature set, the
@@ -35,6 +37,7 @@ const UNKNOWN: Profile = Profile {
     equalizer: Some(EqLayout::FiveBands),
     dsee: true,
     wear_sensor: true,
+    noise_button: false,
 };
 
 const fn over_ear(model: &'static str, speak_to_chat: bool, equalizer: EqLayout) -> Profile {
@@ -47,8 +50,11 @@ const fn earbuds(model: &'static str, wind_reduction: bool) -> Profile {
 
 /// Name fragments (upper case) and the profile they identify.
 const PROFILES: [(&[&str], Profile); 8] = [
-    (&["WH-1000XM5"], Profile { tested: true, ..over_ear("WH-1000XM5", true, EqLayout::FiveBands) }),
-    (&["WH-1000XM6"], over_ear("WH-1000XM6", true, EqLayout::TenBands)),
+    (
+        &["WH-1000XM5"],
+        Profile { tested: true, noise_button: true, ..over_ear("WH-1000XM5", true, EqLayout::FiveBands) },
+    ),
+    (&["WH-1000XM6"], Profile { noise_button: true, ..over_ear("WH-1000XM6", true, EqLayout::TenBands) }),
     (&["WH-CH720N"], Profile { wear_sensor: false, ..over_ear("WH-CH720N", false, EqLayout::FiveBands) }),
     (&["ULT WEAR", "WH-ULT900N"], Profile { wear_sensor: false, ..over_ear("ULT WEAR", false, EqLayout::FiveBands) }),
     (&["WF-1000XM4"], earbuds("WF-1000XM4", true)),
@@ -94,6 +100,7 @@ impl Profile {
             ambient: Some(Ambient { levels: 1..=20, focus_on_voice: true }),
             features,
             auto_off: if self.wear_sensor { auto_off_choices() } else { Vec::new() },
+            noise_button: if self.noise_button { NoiseButton::ALL.to_vec() } else { Vec::new() },
             equalizer: self.equalizer,
         }
     }
@@ -114,6 +121,9 @@ impl Profile {
         }
         if self.wear_sensor {
             requests.extend([Request::PauseWhenTakenOff, Request::AutoOff]);
+        }
+        if self.noise_button {
+            requests.push(Request::NoiseButton);
         }
         requests
     }
@@ -150,8 +160,8 @@ mod tests {
 
     #[test]
     fn asks_each_model_for_what_it_has() {
-        // What the WH-1000XM5 was tested with, then pausing and turning off
-        // when taken off, which Gadgetbridge supports on it.
+        // What the WH-1000XM5 was tested with, then what other apps change on
+        // it: pausing and turning off when taken off, and its NC/AMB button.
         assert_eq!(
             profile_for("WH-1000XM5").initial_requests(),
             [
@@ -165,8 +175,10 @@ mod tests {
                 Request::Dsee,
                 Request::PauseWhenTakenOff,
                 Request::AutoOff,
+                Request::NoiseButton,
             ]
         );
+        assert!(!profile_for("WF-1000XM5").initial_requests().contains(&Request::NoiseButton));
         let earbuds = profile_for("WF-1000XM5").initial_requests();
         assert!(earbuds.contains(&Request::EarbudBattery) && earbuds.contains(&Request::CaseBattery));
         assert!(!earbuds.contains(&Request::Battery));

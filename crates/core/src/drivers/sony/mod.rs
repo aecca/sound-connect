@@ -75,6 +75,7 @@ impl SonyDriver {
             Reply::Equalizer(equalizer) => vec![Update::Equalizer(equalizer)],
             Reply::PauseWhenTakenOff(on) => vec![Update::Feature(Feature::PauseWhenTakenOff, on)],
             Reply::AutoOff(auto_off) => vec![Update::AutoOff(auto_off)],
+            Reply::NoiseButton(choice) => vec![Update::NoiseButton(choice)],
         }
     }
 }
@@ -112,6 +113,9 @@ impl Driver for SonyDriver {
             Setting::AutoOff(auto_off) if self.device.auto_off.contains(&auto_off) => {
                 self.session.request(Request::SetAutoOff(auto_off), now)
             }
+            Setting::NoiseButton(choice) if self.device.noise_button.contains(&choice) => {
+                self.session.request(Request::SetNoiseButton(choice), now)
+            }
             Setting::EqualizerPreset(preset) => match self.profile.equalizer {
                 Some(layout) => self.session.request(Request::SetEqualizerPreset(layout, preset), now),
                 None => Vec::new(),
@@ -135,7 +139,7 @@ impl Driver for SonyDriver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::device::{AutoOff, Battery, ListeningMode};
+    use crate::device::{AutoOff, Battery, ListeningMode, NoiseButton};
     use frame::{Message, kind};
 
     /// Feeds the driver what a WH-1000XM5 says: an ACK, then a message.
@@ -188,6 +192,7 @@ mod tests {
         assert!(driver.set(Setting::Feature(Feature::VoicePrompts, true), now).is_empty());
         assert!(driver.set(Setting::Feature(Feature::PauseWhenTakenOff, true), now).is_empty());
         assert!(driver.set(Setting::AutoOff(AutoOff::Never), now).is_empty());
+        assert!(driver.set(Setting::NoiseButton(NoiseButton::AmbientOff), now).is_empty());
     }
 
     #[test]

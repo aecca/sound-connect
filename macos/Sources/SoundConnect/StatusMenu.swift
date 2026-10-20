@@ -29,6 +29,8 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     private var presetItems: [(EqPreset, NSMenuItem)] = []
     private var autoOffItem: NSMenuItem?
     private var autoOffItems: [(AutoOff, NSMenuItem)] = []
+    private var noiseButtonItem: NSMenuItem?
+    private var noiseButtonItems: [(NoiseButton, NSMenuItem)] = []
     private var shortcutItem: NSMenuItem?
     private var batteryAlertsItem: NSMenuItem?
     private var openAtLoginItem: NSMenuItem?
@@ -122,6 +124,8 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         presetItems = []
         autoOffItem = nil
         autoOffItems = []
+        noiseButtonItem = nil
+        noiseButtonItems = []
 
         // Views inside menus need a real frame; SwiftUI sizes the header itself.
         let header = NSHostingView(rootView: HeaderView(model: model, updater: updater) { [weak self] in
@@ -169,6 +173,14 @@ final class StatusMenu: NSObject, NSMenuDelegate {
                 item.image = symbol("moon.zzz")
                 item.submenu = autoOffMenu(device.autoOff)
                 autoOffItem = item
+                menu.addItem(item)
+            }
+            if !device.noiseButton.isEmpty {
+                let item = NSMenuItem(title: "Noise Control Button", action: nil, keyEquivalent: "")
+                item.image = symbol("button.horizontal.top.press")
+                item.toolTip = "What the button on your headphones switches between"
+                item.submenu = noiseButtonMenu(device.noiseButton)
+                noiseButtonItem = item
                 menu.addItem(item)
             }
         }
@@ -249,6 +261,10 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         for (choice, item) in autoOffItems {
             item.state = model.autoOff == choice ? .on : .off
         }
+        noiseButtonItem?.isHidden = model.noiseButton == nil
+        for (choice, item) in noiseButtonItems {
+            item.state = model.noiseButton == choice ? .on : .off
+        }
     }
 
     private func equalizerMenu() -> NSMenu {
@@ -277,11 +293,24 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         return submenu
     }
 
+    private func noiseButtonMenu(_ choices: [NoiseButton]) -> NSMenu {
+        let submenu = NSMenu()
+        submenu.autoenablesItems = false
+        for choice in choices {
+            let item = actionItem(noiseButtonName(choice: choice), #selector(selectNoiseButton(_:)))
+            item.representedObject = choice
+            submenu.addItem(item)
+            noiseButtonItems.append((choice, item))
+        }
+        return submenu
+    }
+
     /// Re-renders whenever anything the menu shows changes.
     private func observe() {
         withObservationTracking {
             _ = (model.connection, model.device, model.mode, model.ambientLevel, model.focusOnVoice)
-            _ = (model.features, model.autoOff, model.equalizer, model.disconnectedHeadsets, model.notice)
+            _ = (model.features, model.autoOff, model.noiseButton, model.equalizer, model.disconnectedHeadsets)
+            _ = model.notice
         } onChange: {
             Task { @MainActor [weak self] in
                 self?.refresh()
@@ -317,6 +346,10 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
     @objc private func selectAutoOff(_ item: NSMenuItem) {
         if let choice = item.representedObject as? AutoOff { model.change(.autoOff(autoOff: choice)) }
+    }
+
+    @objc private func selectNoiseButton(_ item: NSMenuItem) {
+        if let choice = item.representedObject as? NoiseButton { model.change(.noiseButton(choice: choice)) }
     }
 
     @objc private func editEqualizer() {

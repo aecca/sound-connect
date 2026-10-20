@@ -4,6 +4,7 @@
 //! from the headset's [`Device`], so it works for any brand.
 
 use gpui_kit::component::button::{Button, ButtonGroup};
+use gpui_kit::component::radio::RadioGroup;
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{Disableable, Selectable, Sizable, Theme, h_flex, v_flex};
@@ -275,6 +276,26 @@ impl Panel {
         Some(row)
     }
 
+    /// What the headset's noise control button switches between, once the
+    /// headset has said.
+    fn noise_button(&self, device: &Device, p: Palette, cx: &App) -> Option<impl IntoElement> {
+        let current = self.headset.read(cx).noise_button?;
+        let choices = device.noise_button.clone();
+        let selected = choices.iter().position(|&choice| choice == current);
+        let headset = self.headset.clone();
+        let row = v_flex().px_2().py_1().gap_1p5().child("Noise Control Button").child(
+            RadioGroup::vertical("noise-button")
+                .children(choices.iter().map(|choice| choice.name()))
+                .selected_index(selected)
+                .on_change(move |&index, _, cx| {
+                    if let Some(&choice) = choices.get(index) {
+                        headset.update(cx, |headset, cx| headset.change(Setting::NoiseButton(choice), cx));
+                    }
+                }),
+        );
+        Some(row.text_color(p.label))
+    }
+
     fn message(title: &str, body: &str, p: Palette) -> impl IntoElement {
         v_flex()
             .flex_1()
@@ -297,6 +318,7 @@ impl Panel {
             .children(self.calls(p, cx))
             .when(!device.features.is_empty(), |this| this.child(separator(p)).child(self.features(device, p, cx)))
             .when_some(self.auto_off(device, p, cx), |this, auto_off| this.child(separator(p)).child(auto_off))
+            .when_some(self.noise_button(device, p, cx), |this, button| this.child(separator(p)).child(button))
             .child(separator(p))
             .child(Self::low_battery_alerts(p, cx))
             .into_any_element()

@@ -9,7 +9,7 @@
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Instant;
 
-use sc_core::{Battery, BatteryLayout, Brand, Driver, EqLayout, Feature, ListeningMode};
+use sc_core::{Battery, BatteryLayout, Brand, Driver, EqLayout, Feature, ListeningMode, NoiseButton};
 
 uniffi::setup_scaffolding!();
 
@@ -42,6 +42,14 @@ pub enum Feature {
     Dsee,
     VoicePrompts,
     PauseWhenTakenOff,
+}
+
+#[uniffi::remote(Enum)]
+pub enum NoiseButton {
+    NoiseCancellingAmbientOff,
+    NoiseCancellingAmbient,
+    NoiseCancellingOff,
+    AmbientOff,
 }
 
 #[uniffi::remote(Enum)]
@@ -92,6 +100,7 @@ pub struct Device {
     pub ambient: Option<Ambient>,
     pub features: Vec<Feature>,
     pub auto_off: Vec<AutoOff>,
+    pub noise_button: Vec<NoiseButton>,
     pub equalizer: Option<EqLayout>,
 }
 
@@ -141,6 +150,7 @@ pub enum Update {
     FocusOnVoice { on: bool },
     Feature { feature: Feature, on: bool },
     AutoOff { auto_off: AutoOff },
+    NoiseButton { choice: NoiseButton },
     Equalizer { equalizer: Equalizer },
 }
 
@@ -152,6 +162,7 @@ pub enum Setting {
     FocusOnVoice { on: bool },
     Feature { feature: Feature, on: bool },
     AutoOff { auto_off: AutoOff },
+    NoiseButton { choice: NoiseButton },
     EqualizerPreset { preset: EqPreset },
     EqualizerBands { bands: EqBands },
 }
@@ -298,6 +309,11 @@ pub fn auto_off_name(auto_off: AutoOff) -> String {
     sc_core::AutoOff::from(auto_off).name()
 }
 
+#[uniffi::export]
+pub fn noise_button_name(choice: NoiseButton) -> String {
+    choice.name().to_owned()
+}
+
 // Conversions to and from the sc-core types.
 
 impl From<sc_core::Device> for Device {
@@ -315,6 +331,7 @@ impl From<sc_core::Device> for Device {
             }),
             features: device.features,
             auto_off: device.auto_off.into_iter().map(Into::into).collect(),
+            noise_button: device.noise_button,
             equalizer: device.equalizer,
         }
     }
@@ -431,6 +448,7 @@ impl From<sc_core::Update> for Update {
             U::FocusOnVoice(on) => Self::FocusOnVoice { on },
             U::Feature(feature, on) => Self::Feature { feature, on },
             U::AutoOff(auto_off) => Self::AutoOff { auto_off: auto_off.into() },
+            U::NoiseButton(choice) => Self::NoiseButton { choice },
             U::Equalizer(equalizer) => Self::Equalizer { equalizer: equalizer.into() },
         }
     }
@@ -444,6 +462,7 @@ impl From<Setting> for sc_core::Setting {
             Setting::FocusOnVoice { on } => Self::FocusOnVoice(on),
             Setting::Feature { feature, on } => Self::Feature(feature, on),
             Setting::AutoOff { auto_off } => Self::AutoOff(auto_off.into()),
+            Setting::NoiseButton { choice } => Self::NoiseButton(choice),
             Setting::EqualizerPreset { preset } => Self::EqualizerPreset(preset.into()),
             Setting::EqualizerBands { bands } => Self::EqualizerBands(bands.into()),
         }

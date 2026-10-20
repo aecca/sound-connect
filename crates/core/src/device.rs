@@ -37,6 +37,9 @@ pub struct Device {
     pub features: Vec<Feature>,
     /// Choices for turning off by itself; empty when it can't be changed.
     pub auto_off: Vec<AutoOff>,
+    /// Choices for what its noise control button switches between; empty
+    /// when it can't be changed.
+    pub noise_button: Vec<NoiseButton>,
     pub equalizer: Option<EqLayout>,
 }
 
@@ -60,6 +63,7 @@ impl Device {
             ambient: None,
             features: Vec::new(),
             auto_off: Vec::new(),
+            noise_button: Vec::new(),
             equalizer: None,
         }
     }
@@ -181,6 +185,30 @@ impl AutoOff {
     }
 }
 
+/// The listening modes the headset's noise control button switches between,
+/// in turn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum NoiseButton {
+    NoiseCancellingAmbientOff,
+    NoiseCancellingAmbient,
+    NoiseCancellingOff,
+    AmbientOff,
+}
+
+impl NoiseButton {
+    pub const ALL: [Self; 4] =
+        [Self::NoiseCancellingAmbientOff, Self::NoiseCancellingAmbient, Self::NoiseCancellingOff, Self::AmbientOff];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::NoiseCancellingAmbientOff => "Noise Cancelling, Ambient Sound and Off",
+            Self::NoiseCancellingAmbient => "Noise Cancelling and Ambient Sound",
+            Self::NoiseCancellingOff => "Noise Cancelling and Off",
+            Self::AmbientOff => "Ambient Sound and Off",
+        }
+    }
+}
+
 /// Something the headset reported.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Update {
@@ -203,6 +231,7 @@ pub enum Update {
     FocusOnVoice(bool),
     Feature(Feature, bool),
     AutoOff(AutoOff),
+    NoiseButton(NoiseButton),
     Equalizer(Equalizer),
 }
 
@@ -214,6 +243,7 @@ pub enum Setting {
     FocusOnVoice(bool),
     Feature(Feature, bool),
     AutoOff(AutoOff),
+    NoiseButton(NoiseButton),
     EqualizerPreset(EqPreset),
     EqualizerBands(EqBands),
 }

@@ -7,7 +7,7 @@ use std::sync::mpsc;
 
 use gpui_kit::*;
 use sc_bluetooth::Event;
-use sc_core::{AutoOff, Battery, Device, Feature, ListeningMode, Setting, Update};
+use sc_core::{AutoOff, Battery, Device, Feature, ListeningMode, NoiseButton, Setting, Update};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Connection {
@@ -28,6 +28,7 @@ pub struct Headset {
     pub focus_on_voice: Option<bool>,
     pub features: HashMap<Feature, bool>,
     pub auto_off: Option<AutoOff>,
+    pub noise_button: Option<NoiseButton>,
     requests: mpsc::Sender<Setting>,
 }
 
@@ -44,6 +45,7 @@ impl Headset {
             focus_on_voice: None,
             features: HashMap::new(),
             auto_off: None,
+            noise_button: None,
             requests,
         }
     }
@@ -73,6 +75,7 @@ impl Headset {
                 self.features.insert(feature, on);
             }
             Update::AutoOff(auto_off) => self.auto_off = Some(auto_off),
+            Update::NoiseButton(choice) => self.noise_button = Some(choice),
             // Not shown in this panel yet.
             Update::Firmware(_) | Update::Earbuds { .. } | Update::CaseBattery(_) | Update::Equalizer(_) => {}
         }
@@ -92,6 +95,7 @@ impl Headset {
             Setting::FocusOnVoice(on) => self.focus_on_voice.replace(on) != Some(on),
             Setting::Feature(feature, on) => self.features.insert(feature, on) != Some(on),
             Setting::AutoOff(auto_off) => self.auto_off.replace(auto_off) != Some(auto_off),
+            Setting::NoiseButton(choice) => self.noise_button.replace(choice) != Some(choice),
             // This panel has no equalizer; the change still goes through.
             Setting::EqualizerPreset(_) | Setting::EqualizerBands(_) => true,
         };

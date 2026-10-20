@@ -90,6 +90,7 @@ impl BoseDriver {
             ambient: None,
             features: vec![Feature::VoicePrompts],
             auto_off: AUTO_OFF.to_vec(),
+            noise_button: Vec::new(),
             equalizer: None,
         };
         Update::Device(self.device.clone())
