@@ -48,9 +48,10 @@ const fn over_ear(model: &'static str, equalizer: EqLayout) -> Profile {
     Profile { model, equalizer: Some(equalizer), noise_button: true, speak_to_chat_options: true, ..UNKNOWN }
 }
 
-/// Over-ear models without Speak-to-Chat or a wear sensor.
-const fn plain_over_ear(model: &'static str) -> Profile {
-    Profile { model, speak_to_chat: false, wear_sensor: false, ..UNKNOWN }
+/// Other over-ear models: without Speak-to-Chat, and some without a wear
+/// sensor.
+const fn plain_over_ear(model: &'static str, wear_sensor: bool) -> Profile {
+    Profile { model, speak_to_chat: false, wear_sensor, ..UNKNOWN }
 }
 
 const fn earbuds(model: &'static str, wind_reduction: bool, speak_to_chat_options: bool) -> Profile {
@@ -61,8 +62,9 @@ const fn earbuds(model: &'static str, wind_reduction: bool, speak_to_chat_option
 const PROFILES: [(&[&str], Profile); 8] = [
     (&["WH-1000XM5"], Profile { tested: true, ..over_ear("WH-1000XM5", EqLayout::FiveBands) }),
     (&["WH-1000XM6"], over_ear("WH-1000XM6", EqLayout::TenBands)),
-    (&["WH-CH720N"], plain_over_ear("WH-CH720N")),
-    (&["ULT WEAR", "WH-ULT900N"], plain_over_ear("ULT WEAR")),
+    (&["WH-CH720N"], plain_over_ear("WH-CH720N", false)),
+    // Sony Device Center lists a wear sensor on the ULT WEAR.
+    (&["ULT WEAR", "WH-ULT900N"], plain_over_ear("ULT WEAR", true)),
     // Gadgetbridge has no Speak-to-Chat options for the WF-1000XM4.
     (&["WF-1000XM4"], earbuds("WF-1000XM4", true, false)),
     (&["WF-1000XM5"], earbuds("WF-1000XM5", true, true)),
@@ -197,7 +199,8 @@ mod tests {
         assert!(earbuds.contains(&Request::EarbudBattery) && earbuds.contains(&Request::CaseBattery));
         assert!(!earbuds.contains(&Request::Battery));
         assert!(!profile_for("WH-CH720N").initial_requests().contains(&Request::SpeakToChat));
-        assert!(!profile_for("ULT WEAR").initial_requests().contains(&Request::AutoOff));
+        assert!(!profile_for("WH-CH720N").initial_requests().contains(&Request::AutoOff));
+        assert!(profile_for("ULT WEAR").initial_requests().contains(&Request::AutoOff));
         assert!(profile_for("WH-1000XM6").initial_requests().contains(&Request::Equalizer(EqLayout::TenBands)));
     }
 

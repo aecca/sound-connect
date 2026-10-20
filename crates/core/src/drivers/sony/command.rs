@@ -133,6 +133,9 @@ const PAUSE_WHEN_TAKEN_OFF: u8 = 0x01;
 const AUTO_OFF_WEARING: u8 = 0x05;
 /// Its choices, as Sony's app offers them, and the two bytes each is sent as.
 const AUTO_OFF_CODES: [(AutoOff, [u8; 2]); 2] = [(AutoOff::WhenTakenOff, [0x10, 0x00]), (AutoOff::Never, [0x11, 0x00])];
+/// Timers the same setting can also hold, set by other apps: minutes, by
+/// the first byte.
+const AUTO_OFF_TIMERS: [(u8, u16); 5] = [(0x00, 5), (0x01, 30), (0x02, 60), (0x03, 180), (0x04, 15)];
 /// What the NC/AMB button switches between, among the noise-control settings.
 const NOISE_BUTTON: u8 = 0x30;
 /// Five-band equalizer values are sent offset by 10, so -10..=10 becomes 0..=20.
@@ -364,7 +367,11 @@ pub(super) fn parse(p: &[u8]) -> Option<Reply> {
             NoiseButton::ALL.into_iter().find(|&choice| noise_button_code(choice) == p[2]).map(Reply::NoiseButton)
         }
         0x27 | 0x29 if p.len() >= 3 && p[1] == AUTO_OFF_WEARING => {
-            AUTO_OFF_CODES.iter().find(|(_, code)| code[0] == p[2]).map(|(choice, _)| Reply::AutoOff(*choice))
+            let choice = AUTO_OFF_CODES.iter().find(|(_, code)| code[0] == p[2]).map(|(choice, _)| *choice);
+            let timer = || {
+                AUTO_OFF_TIMERS.iter().find(|(code, _)| *code == p[2]).map(|&(_, minutes)| AutoOff::Minutes(minutes))
+            };
+            choice.or_else(timer).map(Reply::AutoOff)
         }
         0x57 | 0x59 if p.len() == 10 && p[1] == layout_code(EqLayout::FiveBands) && p[3] == 6 => {
             Some(Reply::Equalizer(Equalizer {
@@ -556,8 +563,9 @@ mod tests {
     fn encodes_and_parses_automatic_power_off() {
         assert_eq!(parse(&[0x27, 0x05, 0x10, 0x00]), Some(Reply::AutoOff(AutoOff::WhenTakenOff)));
         assert_eq!(parse(&[0x29, 0x05, 0x11, 0x00]), Some(Reply::AutoOff(AutoOff::Never)));
-        // Timers other models use aren't offered, so they aren't shown either.
-        assert_eq!(parse(&[0x27, 0x05, 0x01, 0x01]), None);
+        // Timers aren't offered, but another app may have set one.
+        assert_eq!(parse(&[0x27, 0x05, 0x01, 0x01]), Some(Reply::AutoOff(AutoOff::Minutes(30))));
+        assert_eq!(parse(&[0x27, 0x05, 0x99, 0x00]), None);
         assert_eq!(Request::AutoOff.payload(), [0x26, 0x05]);
         assert_eq!(Request::SetAutoOff(AutoOff::WhenTakenOff).payload(), [0x28, 0x05, 0x10, 0x00]);
         assert_eq!(Request::SetAutoOff(AutoOff::Never).payload(), [0x28, 0x05, 0x11, 0x00]);
