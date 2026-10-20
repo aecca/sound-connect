@@ -31,7 +31,7 @@ fn main() -> ExitCode {
         return control::run(&args);
     }
     // Already running: that copy opens its panel instead.
-    let control::Claim::First(listener) = control::claim() else { return ExitCode::SUCCESS };
+    let control::Claim::First(instance) = control::claim() else { return ExitCode::SUCCESS };
 
     gpui_kit::application().with_assets(assets::Assets).run(|cx| {
         gpui_kit::init(cx);
@@ -58,8 +58,8 @@ fn main() -> ExitCode {
         tray::install(headset.clone(), cx);
         calls::start(headset.clone(), cx);
         battery_alerts::start(headset.clone(), cx);
-        if let Some(listener) = listener {
-            control::serve(listener, headset.clone(), cx);
+        if let Some(instance) = instance {
+            control::serve(instance, headset.clone(), cx);
         }
         update::start(cx);
 

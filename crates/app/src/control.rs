@@ -7,6 +7,7 @@
 //! A client sends one line, the command, and gets back lines starting with
 //! `ok ` or `error `: one, or one per change while it follows the status.
 
+use std::fs::{self, File, TryLockError};
 use std::io::{self, BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
@@ -82,35 +83,51 @@ fn status_command(flags: &[&str]) -> Option<String> {
 
 /// Whether this is the only copy of the app.
 pub enum Claim {
-    /// It is, and answers commands here (nowhere without `$XDG_RUNTIME_DIR`).
-    First(Option<UnixListener>),
+    /// It is, and answers commands (not without `$XDG_RUNTIME_DIR`).
+    First(Option<Instance>),
     /// Another copy is running, and has been asked to show its panel.
     Taken,
 }
 
-/// Claims the socket before the app starts, so two copies started at once
-/// don't both run.
+/// The lock that makes this copy the only one, and the socket it answers on.
+pub struct Instance {
+    lock: File,
+    listener: UnixListener,
+}
+
+/// Claims the app before it starts, so two copies started at once don't both
+/// run. Whoever holds the lock is the one; the system lets go of it when the
+/// app quits, however it quits.
 pub fn claim() -> Claim {
-    let Some(path) = socket_path() else {
+    let Some(dir) = runtime_dir() else {
         eprintln!("not listening for commands: XDG_RUNTIME_DIR isn't set");
         return Claim::First(None);
     };
-    let bound = UnixListener::bind(&path).or_else(|error| {
-        if error.kind() != io::ErrorKind::AddrInUse {
-            return Err(error);
-        }
-        match UnixStream::connect(&path) {
-            Ok(mut running) => {
-                let _ = writeln!(running, "show");
-                Err(io::ErrorKind::AddrInUse.into())
-            }
-            // Left behind by a copy that has quit.
-            Err(_) => std::fs::remove_file(&path).and_then(|()| UnixListener::bind(&path)),
-        }
+    let path = dir.join(SOCKET);
+    let lock = File::create(dir.join("sound-connect.lock")).and_then(|lock| match lock.try_lock() {
+        Ok(()) => Ok(Some(lock)),
+        Err(TryLockError::WouldBlock) => Ok(None),
+        Err(TryLockError::Error(error)) => Err(error),
     });
-    match bound {
-        Ok(listener) => Claim::First(Some(listener)),
-        Err(error) if error.kind() == io::ErrorKind::AddrInUse => Claim::Taken,
+    let lock = match lock {
+        Ok(Some(lock)) => lock,
+        Ok(None) => {
+            // It may still be starting, before it listens: then it just isn't asked.
+            if let Ok(mut running) = UnixStream::connect(&path) {
+                let _ = writeln!(running, "show");
+            }
+            return Claim::Taken;
+        }
+        Err(error) => {
+            eprintln!("not listening for commands: can't lock {}: {error}", dir.display());
+            return Claim::First(None);
+        }
+    };
+    // Only the copy holding the lock gets here, so a socket that's there
+    // was left behind by one that has quit.
+    let _ = fs::remove_file(&path);
+    match UnixListener::bind(&path) {
+        Ok(listener) => Claim::First(Some(Instance { lock, listener })),
         Err(error) => {
             eprintln!("not listening for commands on {}: {error}", path.display());
             Claim::First(None)
@@ -141,8 +158,14 @@ fn send(command: &str, mut answer: impl FnMut(Result<String, String>) -> bool) -
     Ok(())
 }
 
+const SOCKET: &str = "sound-connect.sock";
+
+fn runtime_dir() -> Option<PathBuf> {
+    std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from)
+}
+
 fn socket_path() -> Option<PathBuf> {
-    std::env::var_os("XDG_RUNTIME_DIR").map(|dir| PathBuf::from(dir).join("sound-connect.sock"))
+    runtime_dir().map(|dir| dir.join(SOCKET))
 }
 
 type Answers = async_channel::Sender<Result<String, String>>;
@@ -165,11 +188,14 @@ struct Follower {
 }
 
 /// Starts answering commands on the socket [`claim`] got.
-pub fn serve(listener: UnixListener, headset: Entity<Headset>, cx: &mut App) {
+pub fn serve(instance: Instance, headset: Entity<Headset>, cx: &mut App) {
     let (requests, received) = async_channel::unbounded();
+    let Instance { lock, listener } = instance;
     thread::Builder::new()
         .name("control".into())
         .spawn(move || {
+            // Held for as long as the app runs.
+            let _lock = lock;
             for stream in listener.incoming().flatten() {
                 let requests = requests.clone();
                 // One thread per client, so a slow one doesn't hold up the rest.

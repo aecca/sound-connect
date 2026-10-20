@@ -100,9 +100,8 @@ async fn link(
                     searching = true;
                     let _ = events.send(Event::Searching).await;
                 }
-                // Connected, but its controls can't be reached.
                 if std::mem::take(&mut expected) {
-                    let _ = events.send(Event::ConnectFailed).await;
+                    let _ = events.send(Event::ControlsUnreachable).await;
                 }
             }
         }

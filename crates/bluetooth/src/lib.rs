@@ -25,6 +25,9 @@ pub enum Event {
     Paired(Vec<PairedHeadset>),
     /// Connecting a paired headset didn't work, e.g. because it's off.
     ConnectFailed,
+    /// A paired headset connected, but its controls can't be reached yet.
+    /// The link keeps trying, as with any connected headset.
+    ControlsUnreachable,
     Connected {
         name: String,
     },

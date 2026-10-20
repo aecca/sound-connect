@@ -92,6 +92,10 @@ impl Headset {
                 self.connecting = None;
                 self.notice = Some("Couldn't connect. Are they on?");
             }
+            Event::ControlsUnreachable => {
+                self.connecting = None;
+                self.notice = Some("They're connected, but their settings can't be reached yet.");
+            }
             Event::Connected { name } => {
                 self.connection = Connection::Connected;
                 self.name = Some(name);
