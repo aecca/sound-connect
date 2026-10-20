@@ -8,6 +8,7 @@ use gpui_kit::*;
 
 use crate::headset::Headset;
 use crate::panel::{self, Panel};
+use crate::status;
 
 #[cfg(target_os = "linux")]
 mod linux;
@@ -30,7 +31,19 @@ impl Global for PanelWindow {}
 pub fn install(headset: Entity<Headset>, cx: &mut App) {
     let (clicks, clicked) = async_channel::unbounded();
     let tray = platform::Tray::new(clicks);
+    // The tooltip says which mode the headset is in and how full its battery
+    // is. The headset changes far more often than that.
+    let mut shown = status::text(headset.read(cx));
+    tray.set_status(shown.clone());
     cx.set_global(PanelWindow { handle: None, dismissed_at: None, tray });
+    cx.observe(&headset, move |headset, cx| {
+        let status = status::text(headset.read(cx));
+        if status != shown {
+            shown.clone_from(&status);
+            cx.global::<PanelWindow>().tray.set_status(status);
+        }
+    })
+    .detach();
     cx.spawn(async move |cx| {
         while let Ok(anchor) = clicked.recv().await {
             cx.update(|cx| toggle(anchor, &headset, cx));

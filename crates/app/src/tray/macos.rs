@@ -37,6 +37,11 @@ impl Tray {
     pub fn anchor(&self) -> Option<Anchor> {
         self.0.rect()
     }
+
+    /// What the icon's tooltip says under the app's name.
+    pub fn set_status(&self, status: String) {
+        let _ = self.0.set_tooltip(Some(format!("Sound Connect\n{status}")));
+    }
 }
 
 /// Centers the panel under the icon.

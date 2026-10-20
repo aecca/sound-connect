@@ -17,14 +17,22 @@ pub type Anchor = Option<Point<Pixels>>;
 const MARGIN: f32 = 8.;
 
 pub struct Tray {
-    _handle: Option<Handle<Item>>,
+    handle: Option<Handle<Item>>,
 }
 
 impl Tray {
     pub fn new(clicks: async_channel::Sender<Anchor>) -> Self {
         // Keep going without a tray host: the icon appears once one starts.
         let handle = Item::new(clicks).assume_sni_available(true).spawn();
-        Self { _handle: handle.inspect_err(|error| eprintln!("failed to add the tray icon: {error}")).ok() }
+        Self { handle: handle.inspect_err(|error| eprintln!("failed to add the tray icon: {error}")).ok() }
+    }
+
+    /// What the icon's tooltip says under the app's name, like the mode and
+    /// battery level.
+    pub fn set_status(&self, status: String) {
+        if let Some(handle) = &self.handle {
+            handle.update(|item| item.status = status);
+        }
     }
 
     /// Where to open the panel without a click: the top-right corner.
@@ -36,6 +44,7 @@ impl Tray {
 struct Item {
     clicks: async_channel::Sender<Anchor>,
     pixmap: ksni::Icon,
+    status: String,
 }
 
 impl Item {
@@ -44,7 +53,7 @@ impl Item {
         // icon theme has no headphones.
         let data = icon::headphones().into_iter().flat_map(|alpha| [alpha, 255, 255, 255]).collect();
         let pixmap = ksni::Icon { width: icon::SIZE as i32, height: icon::SIZE as i32, data };
-        Self { clicks, pixmap }
+        Self { clicks, pixmap, status: String::new() }
     }
 }
 
@@ -70,7 +79,7 @@ impl ksni::Tray for Item {
     }
 
     fn tool_tip(&self) -> ksni::ToolTip {
-        ksni::ToolTip { title: "Sound Connect".into(), ..Default::default() }
+        ksni::ToolTip { title: "Sound Connect".into(), description: self.status.clone(), ..Default::default() }
     }
 
     fn activate(&mut self, x: i32, y: i32) {

@@ -101,6 +101,11 @@ final class HeadsetModel {
         equalizer = nil
     }
 
+    /// The headset's battery, or the emptier earbud's.
+    var lowestBattery: Battery? {
+        battery ?? [leftBattery, rightBattery].compactMap { $0 }.min { $0.level < $1.level }
+    }
+
     /// Switches to the listening mode after the current one, in the order the
     /// menu lists them, and back to the first after the last.
     func switchToNextMode() {

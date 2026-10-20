@@ -36,6 +36,13 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     private var noiseButtonItems: [(NoiseButton, NSMenuItem)] = []
     private var shortcutItem: NSMenuItem?
     private var batteryAlertsItem: NSMenuItem?
+    private var batteryInMenuBarItem: NSMenuItem?
+    /// Shows the battery level next to the icon. Off at first: it makes the
+    /// icon wider, and macOS hides icons that don't fit beside the notch.
+    private var showsBattery = UserDefaults.standard.bool(forKey: StatusMenu.showsBatteryKey) {
+        didSet { UserDefaults.standard.set(showsBattery, forKey: Self.showsBatteryKey) }
+    }
+    private static let showsBatteryKey = "ShowBatteryInMenuBar"
     private var openAtLoginItem: NSMenuItem?
 
     private enum Layout: Equatable {
@@ -104,15 +111,23 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     }
 
     /// The menu bar icon: over-ear headphones, distinct from the system's own
-    /// headphones symbol, dimmed while no headset is connected.
+    /// headphones symbol, dimmed while no headset is connected, and the
+    /// battery level next to it when the user wants that.
     private func updateIcon() {
         let mode = model.device?.modes.first { $0.mode == model.mode }
         let description = mode.map { "Sound Connect: \($0.name)" } ?? "Sound Connect: not connected"
         let image = NSImage(systemSymbolName: "beats.headphones", accessibilityDescription: description)?
             .withSymbolConfiguration(.init(pointSize: 15, weight: .regular))
         image?.isTemplate = true
-        statusItem.button?.image = image
-        statusItem.button?.appearsDisabled = model.device == nil
+        guard let button = statusItem.button else { return }
+        button.image = image
+        button.appearsDisabled = model.device == nil
+
+        let battery = showsBattery ? model.lowestBattery : nil
+        statusItem.length = battery == nil ? NSStatusItem.squareLength : NSStatusItem.variableLength
+        button.imagePosition = battery == nil ? .imageOnly : .imageLeading
+        button.title = battery.map { "\($0.level)%" } ?? ""
+        button.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
     }
 
     private func build(_ layout: Layout) {
@@ -202,6 +217,8 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         shortcutItem = actionItem(ModeShortcut.title, #selector(toggleShortcut))
         shortcutItem?.toolTip = "Press Control-Option-Command-N in any app to switch to the next mode."
         menu.addItem(shortcutItem!)
+        batteryInMenuBarItem = actionItem("Show Battery in Menu Bar", #selector(toggleBatteryInMenuBar))
+        menu.addItem(batteryInMenuBarItem!)
         batteryAlertsItem = actionItem("Low Battery Alerts", #selector(toggleBatteryAlerts))
         batteryAlertsItem?.toolTip = "A notification when the battery is down to 20%, and again at 10%."
         menu.addItem(batteryAlertsItem!)
@@ -252,6 +269,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         openAtLoginItem?.state = SMAppService.mainApp.status == .enabled ? .on : .off
         shortcutItem?.state = shortcut.isOn ? .on : .off
         batteryAlertsItem?.state = batteryAlerts.isOn ? .on : .off
+        batteryInMenuBarItem?.state = showsBattery ? .on : .off
         for (mode, item) in modeItems {
             item.state = model.mode == mode ? .on : .off
         }
@@ -352,6 +370,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             _ = (model.connection, model.device, model.mode, model.ambientLevel, model.focusOnVoice)
             _ = (model.features, model.autoOff, model.noiseButton, model.equalizer, model.disconnectedHeadsets)
             _ = (model.voiceSensitivity, model.speakToChatEnd, model.notice)
+            _ = (model.battery, model.leftBattery, model.rightBattery)
         } onChange: {
             Task { @MainActor [weak self] in
                 self?.refresh()
@@ -414,6 +433,12 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     @objc private func toggleShortcut() {
         shortcut.isOn.toggle()
         update()
+    }
+
+    @objc private func toggleBatteryInMenuBar() {
+        showsBattery.toggle()
+        update()
+        updateIcon()
     }
 
     @objc private func toggleBatteryAlerts() {

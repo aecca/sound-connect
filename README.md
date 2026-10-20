@@ -53,7 +53,7 @@ Sound Connect sits in your menu bar (or your system tray on Linux). Click the he
 - 🔕 Turn **voice prompts** on or off, and choose when your headphones **turn off** on their own
 - ⏸️ **Pause music** when you take your headphones off
 - 🔘 Choose what the **noise control button** on your headphones switches between, or have the **Action button** on Bose headphones change noise cancelling
-- 🔋 See your **battery level**, including each earbud and the case, and get a **notification** when it runs low
+- 🔋 See your **battery level**, including each earbud and the case, and get a **notification** when it runs low. On a Mac it can also show next to the menu bar icon
 - 🔗 **Connect** your headphones with one click when they're paired but not connected
 - ⌨️ Switch modes with a **keyboard shortcut**, from any app
 
