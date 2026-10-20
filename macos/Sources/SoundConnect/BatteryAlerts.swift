@@ -55,10 +55,11 @@ final class BatteryAlerts: NSObject, UNUserNotificationCenterDelegate {
         let request = UNNotificationRequest(identifier: "low-battery", content: content, trigger: nil)
         // Only reached with an app bundle: the notification center needs one,
         // and the README snapshots run without.
-        let center = UNUserNotificationCenter.current()
-        center.delegate = self
-        center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
-            if granted { center.add(request) }
+        UNUserNotificationCenter.current().delegate = self
+        Task {
+            let center = UNUserNotificationCenter.current()
+            guard (try? await center.requestAuthorization(options: [.alert, .sound])) == true else { return }
+            try? await center.add(request)
         }
     }
 
