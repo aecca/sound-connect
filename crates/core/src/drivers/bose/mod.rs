@@ -42,6 +42,14 @@ const AUTO_OFF: [AutoOff; 6] = [
 const VOICE_PROMPTS_ON: u8 = 1 << 5;
 const LANGUAGE_MASK: u8 = 0x1f;
 
+/// The QuietComfort 35 II's Action button, on a single press, and the two
+/// things it can do, per bosectl.
+const ACTION_BUTTON: [u8; 2] = [0x10, 0x04];
+const ACTION_VOICE_ASSISTANT: u8 = 0x01;
+const ACTION_NOISE_CANCELLING: u8 = 0x02;
+/// Only the QuietComfort 35 II has the Action button.
+const HAS_ACTION_BUTTON: u16 = 0x4020;
+
 pub struct BoseDriver {
     device: Device,
     reader: PacketReader,
@@ -88,12 +96,20 @@ impl BoseDriver {
                 Mode { mode: ListeningMode::NoiseCancelling, name: "High" },
             ],
             ambient: None,
-            features: vec![Feature::VoicePrompts],
+            features: if product_id == HAS_ACTION_BUTTON {
+                vec![Feature::VoicePrompts, Feature::ActionButtonNoiseCancelling]
+            } else {
+                vec![Feature::VoicePrompts]
+            },
             auto_off: AUTO_OFF.to_vec(),
             noise_button: Vec::new(),
             speak_to_chat_options: false,
             equalizer: None,
         };
+        if self.device.features.contains(&Feature::ActionButtonNoiseCancelling) {
+            // Goes out after the other start-up reads.
+            self.requests.push(Packet::get(Function::BUTTONS), |_| false);
+        }
         Update::Device(self.device.clone())
     }
 
@@ -122,6 +138,15 @@ impl BoseDriver {
                 let minutes = *payload.first()?;
                 Some(Update::AutoOff(if minutes == 0 { AutoOff::Never } else { AutoOff::Minutes(minutes.into()) }))
             }
+            Function::BUTTONS => match payload[..] {
+                [button, press, action, ..] if [button, press] == ACTION_BUTTON => match action {
+                    ACTION_NOISE_CANCELLING => Some(Update::Feature(Feature::ActionButtonNoiseCancelling, true)),
+                    ACTION_VOICE_ASSISTANT => Some(Update::Feature(Feature::ActionButtonNoiseCancelling, false)),
+                    // Set to something else, e.g. turned off, by another app.
+                    _ => None,
+                },
+                _ => None,
+            },
             _ => None,
         }
     }
@@ -171,6 +196,15 @@ impl Driver for BoseDriver {
                 let Some(language) = self.language else { return Vec::new() };
                 let byte = language | if on { VOICE_PROMPTS_ON } else { 0 };
                 self.request(Packet::set_get(Function::VOICE_PROMPTS, vec![byte]), now)
+            }
+            Setting::Feature(Feature::ActionButtonNoiseCancelling, on)
+                if self.device.features.contains(&Feature::ActionButtonNoiseCancelling) =>
+            {
+                let action = if on { ACTION_NOISE_CANCELLING } else { ACTION_VOICE_ASSISTANT };
+                self.request(
+                    Packet::set_get(Function::BUTTONS, [ACTION_BUTTON[0], ACTION_BUTTON[1], action].to_vec()),
+                    now,
+                )
             }
             Setting::AutoOff(auto_off) if self.device.auto_off.contains(&auto_off) => {
                 let minutes = match auto_off {
@@ -239,7 +273,44 @@ mod tests {
         let output = driver.receive(&status(Function::PRODUCT, &[0x40, 0x20, 0x02]), now);
         let [Update::Device(device)] = &output.updates[..] else { panic!("{:?}", output.updates) };
         assert_eq!(device.model, "QuietComfort 35 II");
+        assert_eq!(device.features, [Feature::VoicePrompts, Feature::ActionButtonNoiseCancelling]);
+    }
+
+    #[test]
+    fn leaves_the_action_button_out_on_the_first_quietcomfort_35() {
+        let now = Instant::now();
+        let mut driver = BoseDriver::new("Bose QC35");
+        driver.start(now);
+        driver.receive(&status(Function::INIT, &[1, 0, 0, 0, 0]), now);
+        let output = driver.receive(&status(Function::PRODUCT, &[0x40, 0x0c, 0x00]), now);
+        let [Update::Device(device)] = &output.updates[..] else { panic!("{:?}", output.updates) };
         assert_eq!(device.features, [Feature::VoicePrompts]);
+        assert!(driver.set(Setting::Feature(Feature::ActionButtonNoiseCancelling, true), now).is_empty());
+    }
+
+    #[test]
+    fn switches_the_action_button_between_assistant_and_noise_cancelling() {
+        let now = Instant::now();
+        let mut driver = identified(now);
+        for (function, payload) in [
+            (Function::FIRMWARE, &b"4.8.1"[..]),
+            (Function::BATTERY, &[80]),
+            (Function::NOISE_CANCELLING, &[0, 0x0b]),
+            (Function::VOICE_PROMPTS, &[0x21]),
+        ] {
+            driver.receive(&status(function, payload), now);
+        }
+        // The Action button is read last, once the model is known.
+        let output = driver.receive(&status(Function::AUTO_OFF, &[20]), now);
+        assert_eq!(output.writes, [vec![0x01, 0x09, 0x01, 0x00]]);
+        // A QuietComfort 35's answer, as bosectl recorded it: the voice assistant.
+        let output = driver.receive(&status(Function::BUTTONS, &[0x10, 0x04, 0x01, 0x07]), now);
+        assert_eq!(output.updates, [Update::Feature(Feature::ActionButtonNoiseCancelling, false)]);
+
+        assert_eq!(
+            driver.set(Setting::Feature(Feature::ActionButtonNoiseCancelling, true), now),
+            [vec![0x01, 0x09, 0x02, 0x03, 0x10, 0x04, 0x02]]
+        );
     }
 
     #[test]
@@ -282,6 +353,7 @@ mod tests {
         driver.receive(&status(Function::NOISE_CANCELLING, &[0, 0x0b]), now);
         driver.receive(&status(Function::VOICE_PROMPTS, &[0x21]), now);
         driver.receive(&status(Function::AUTO_OFF, &[20]), now);
+        driver.receive(&status(Function::BUTTONS, &[0x10, 0x04, 0x01, 0x07]), now);
 
         assert_eq!(
             driver.set(Setting::Mode(ListeningMode::NoiseCancelling), now),

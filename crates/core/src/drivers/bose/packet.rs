@@ -28,6 +28,9 @@ impl Function {
     pub const AUTO_OFF: Self = Self { block: 1, id: 4 };
     /// Noise cancelling ("active noise reduction") level.
     pub const NOISE_CANCELLING: Self = Self { block: 1, id: 6 };
+    /// What a button does: the button, the press and the action, then which
+    /// actions it can take.
+    pub const BUTTONS: Self = Self { block: 1, id: 9 };
     /// Battery level, in percent.
     pub const BATTERY: Self = Self { block: 2, id: 2 };
 }

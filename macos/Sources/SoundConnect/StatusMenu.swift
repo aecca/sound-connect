@@ -448,6 +448,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         case .dsee: "waveform"
         case .voicePrompts: "speaker.wave.2.bubble"
         case .pauseWhenTakenOff: "pause.circle"
+        case .actionButtonNoiseCancelling: "button.programmable"
         }
     }
 

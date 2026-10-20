@@ -143,6 +143,9 @@ pub enum Feature {
     VoicePrompts,
     /// Pause playback while the headset is off your head or out of your ears.
     PauseWhenTakenOff,
+    /// A button that can either change noise cancelling or call the phone's
+    /// voice assistant (Bose's Action button) changes noise cancelling.
+    ActionButtonNoiseCancelling,
 }
 
 impl Feature {
@@ -152,6 +155,7 @@ impl Feature {
             Self::Dsee => "DSEE Extreme",
             Self::VoicePrompts => "Voice Prompts",
             Self::PauseWhenTakenOff => "Pause When Taken Off",
+            Self::ActionButtonNoiseCancelling => "Action Button for Noise Cancelling",
         }
     }
 
@@ -161,6 +165,9 @@ impl Feature {
             Self::Dsee => "Restores detail lost in compressed music",
             Self::VoicePrompts => "Spoken announcements, like the battery level when turning on",
             Self::PauseWhenTakenOff => "Pauses music when you take them off, and plays it when you put them back on",
+            Self::ActionButtonNoiseCancelling => {
+                "The Action button switches noise cancelling, instead of your phone's voice assistant"
+            }
         }
     }
 }

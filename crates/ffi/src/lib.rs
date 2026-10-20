@@ -45,6 +45,7 @@ pub enum Feature {
     Dsee,
     VoicePrompts,
     PauseWhenTakenOff,
+    ActionButtonNoiseCancelling,
 }
 
 #[uniffi::remote(Enum)]
