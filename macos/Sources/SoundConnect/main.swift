@@ -29,6 +29,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updater.start()
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        link?.close()
+    }
+
     /// Links for Shortcuts, Raycast or a script: soundconnect://mode/next
     /// switches to the next mode, soundconnect://mode/ambient (or another
     /// mode's ID) to that one.
