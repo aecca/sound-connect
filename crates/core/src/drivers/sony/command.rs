@@ -401,7 +401,8 @@ pub(super) fn parse_table_2(p: &[u8]) -> Option<Reply> {
         // The functions and a priority for each.
         0x07 if p.len() >= 3 && p[1] == 0x00 => {
             let count = usize::from(p[2]);
-            Some(Reply::Table2Functions(p[3..].chunks_exact(2).take(count).map(|pair| pair[0]).collect()))
+            let (pairs, _) = p[3..].as_chunks::<2>();
+            Some(Reply::Table2Functions(pairs.iter().take(count).map(|&[function, _priority]| function).collect()))
         }
         0x37 | 0x39 if p.len() >= 3 && [0x00, 0x02].contains(&p[1]) => {
             connected_devices(&p[2..], p[1] == 0x02).map(Reply::ConnectedDevices)
