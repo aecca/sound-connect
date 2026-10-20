@@ -55,6 +55,7 @@ Sound Connect sits in your menu bar (or your system tray on Linux). Click the he
 - 🔘 Choose what the **noise control button** on your headphones switches between, or have the **Action button** on Bose headphones change noise cancelling
 - 🔋 See your **battery level**, including each earbud and the case, and get a **notification** when it runs low. On a Mac it can also show next to the menu bar icon
 - 🔗 **Connect** your headphones with one click when they're paired but not connected
+- 📱 When your Sony headphones are connected to your phone and your computer at once, choose which one you **hear**
 - ⌨️ Switch modes with a **keyboard shortcut**, from any app
 
 If you change the mode with the button on your headphones, Sound Connect shows the change right away.

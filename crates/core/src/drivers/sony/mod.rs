@@ -8,7 +8,7 @@ mod session;
 
 use std::time::Instant;
 
-use command::{ChatOptions, NoiseControl, Reply, Request};
+use command::{ChatOptions, DeviceList, NoiseControl, Reply, Request, device_list};
 use profile::{Profile, profile_for};
 use session::Session;
 
@@ -30,12 +30,21 @@ pub struct SonyDriver {
     noise: Option<NoiseControl>,
     /// Likewise for Speak-to-Chat's options.
     chat: Option<ChatOptions>,
+    /// How the headset lists the devices it's connected to, once it's said it can.
+    devices: Option<DeviceList>,
 }
 
 impl SonyDriver {
     pub fn new(name: &str) -> Self {
         let profile = profile_for(name);
-        Self { device: profile.device(name), profile, session: Session::default(), noise: None, chat: None }
+        Self {
+            device: profile.device(name),
+            profile,
+            session: Session::default(),
+            noise: None,
+            chat: None,
+            devices: None,
+        }
     }
 
     fn request_all(&mut self, requests: Vec<Request>, now: Instant) -> Vec<Frame> {
@@ -63,10 +72,29 @@ impl SonyDriver {
         self.session.request(Request::SetSpeakToChatOptions(chat), now)
     }
 
+    /// What to show for a reply, and anything to ask the headset because of it.
+    fn handle(&mut self, reply: Reply, now: Instant) -> (Vec<Update>, Vec<Frame>) {
+        let ask = |driver: &mut Self, request| driver.session.request(request, now);
+        match reply {
+            Reply::Ready { v2: true, table2: true } => (Vec::new(), ask(self, Request::Table2Functions)),
+            Reply::Table2Functions(functions) => {
+                self.devices = device_list(&functions);
+                let writes = self.devices.map(|list| ask(self, Request::ConnectedDevices(list))).unwrap_or_default();
+                (Vec::new(), writes)
+            }
+            // Read the list again: switching may not have worked, e.g. during a call.
+            Reply::PlayedFrom => {
+                let writes = self.devices.map(|list| ask(self, Request::ConnectedDevices(list))).unwrap_or_default();
+                (Vec::new(), writes)
+            }
+            reply => (self.updates(reply), Vec::new()),
+        }
+    }
+
     fn updates(&mut self, reply: Reply) -> Vec<Update> {
         match reply {
-            Reply::Ready { v2: true } => Vec::new(),
-            Reply::Ready { v2: false } => {
+            Reply::Ready { v2: true, .. } | Reply::Table2Functions(_) | Reply::PlayedFrom => Vec::new(),
+            Reply::Ready { v2: false, .. } => {
                 vec![Update::Unsupported("This headset uses an older protocol that isn't supported yet.".into())]
             }
             Reply::Firmware(version) => vec![Update::Firmware(version)],
@@ -92,6 +120,7 @@ impl SonyDriver {
             Reply::PauseWhenTakenOff(on) => vec![Update::Feature(Feature::PauseWhenTakenOff, on)],
             Reply::AutoOff(auto_off) => vec![Update::AutoOff(auto_off)],
             Reply::NoiseButton(choice) => vec![Update::NoiseButton(choice)],
+            Reply::ConnectedDevices(devices) => vec![Update::ConnectedDevices(devices)],
         }
     }
 }
@@ -108,8 +137,13 @@ impl Driver for SonyDriver {
 
     fn receive(&mut self, bytes: &[u8], now: Instant) -> Output {
         let received = self.session.receive(bytes, now);
-        let updates = received.replies.into_iter().flat_map(|reply| self.updates(reply)).collect();
-        Output { writes: received.writes, updates }
+        let mut output = Output { writes: received.writes, updates: Vec::new() };
+        for reply in received.replies {
+            let (updates, writes) = self.handle(reply, now);
+            output.updates.extend(updates);
+            output.writes.extend(writes);
+        }
+        output
     }
 
     fn set(&mut self, setting: Setting, now: Instant) -> Vec<Frame> {
@@ -134,6 +168,11 @@ impl Driver for SonyDriver {
             }
             Setting::VoiceSensitivity(sensitivity) => self.change_chat(now, |chat| chat.sensitivity = sensitivity),
             Setting::SpeakToChatEnd(end) => self.change_chat(now, |chat| chat.end = end),
+            Setting::PlayFrom(id) if self.devices.is_some() => match id.as_bytes().try_into() {
+                Ok(address) => self.session.request(Request::PlayFrom(address), now),
+                // Not an address this headset gave.
+                Err(_) => Vec::new(),
+            },
             Setting::EqualizerPreset(preset) => match self.profile.equalizer {
                 Some(layout) => self.session.request(Request::SetEqualizerPreset(layout, preset), now),
                 None => Vec::new(),
@@ -211,6 +250,47 @@ mod tests {
         assert!(driver.set(Setting::Feature(Feature::PauseWhenTakenOff, true), now).is_empty());
         assert!(driver.set(Setting::AutoOff(AutoOff::Never), now).is_empty());
         assert!(driver.set(Setting::NoiseButton(NoiseButton::AmbientOff), now).is_empty());
+    }
+
+    /// Feeds the driver a second-table message: an ACK, then the message.
+    fn headset_says_in_table_2(driver: &mut SonyDriver, payload: &[u8], now: Instant) -> Output {
+        let mut bytes = Message { kind: kind::ACK, seq: 1, payload: Vec::new() }.encode();
+        bytes.extend(Message::command_2(0, payload.to_vec()).encode());
+        driver.receive(&bytes, now)
+    }
+
+    #[test]
+    fn lists_connected_devices_and_switches_which_plays() {
+        let now = Instant::now();
+        let mut driver = SonyDriver::new("WF-1000XM5");
+        // Before the headset says how it lists them, there's nothing to switch.
+        assert!(driver.set(Setting::PlayFrom("AA:BB:CC:DD:EE:FF".into()), now).is_empty());
+
+        let output = headset_says(&mut driver, &[0x01, 0x00, 0x03, 0x00, 0x20, 0x16, 0x00, 0x00], now);
+        assert!(output.writes.ends_with(&[Message::command_2(1, vec![0x06, 0x00]).encode()]));
+        let output = headset_says_in_table_2(&mut driver, &[0x07, 0x00, 0x02, 0x32, 0x04, 0x31, 0xff], now);
+        assert!(output.writes.ends_with(&[Message::command_2(1, vec![0x36, 0x02]).encode()]));
+
+        let mut list = vec![0x37, 0x02, 0x02];
+        for (address, slot, name) in [(b"11:22:33:44:55:66", 1, &b"Laptop"[..]), (b"AA:BB:CC:DD:EE:FF", 2, b"Phone")] {
+            list.extend(address);
+            list.extend([slot, 0x5a, 0x02, 0x0c, u8::try_from(name.len()).unwrap()]);
+            list.extend(name);
+        }
+        list.push(1);
+        let output = headset_says_in_table_2(&mut driver, &list, now);
+        let [Update::ConnectedDevices(devices)] = &output.updates[..] else { panic!("{:?}", output.updates) };
+        assert_eq!(
+            devices.iter().map(|device| (device.name.as_str(), device.playing)).collect::<Vec<_>>(),
+            [("Laptop", true), ("Phone", false)]
+        );
+
+        let frames = driver.set(Setting::PlayFrom("AA:BB:CC:DD:EE:FF".into()), now);
+        assert_eq!(frames, [Message::command_2(1, [&[0x3c, 0x01][..], b"AA:BB:CC:DD:EE:FF"].concat()).encode()]);
+        assert!(driver.set(Setting::PlayFrom("not an address".into()), now).is_empty());
+        // Once it has answered, the list is read again to show what happened.
+        let output = headset_says_in_table_2(&mut driver, &[0x3d, 0x01, 0x00], now);
+        assert!(output.writes.ends_with(&[Message::command_2(1, vec![0x36, 0x02]).encode()]));
     }
 
     #[test]

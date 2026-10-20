@@ -345,6 +345,30 @@ impl Panel {
         Some(options)
     }
 
+    /// Which of the devices the headset is connected to it plays, when it's
+    /// connected to more than this computer.
+    fn play_from(&self, p: Palette, cx: &App) -> Option<impl IntoElement> {
+        let devices = &self.headset.read(cx).connected_devices;
+        if devices.len() < 2 {
+            return None;
+        }
+        let ids: Vec<String> = devices.iter().map(|device| device.id.clone()).collect();
+        let headset = self.headset.clone();
+        let row = v_flex().px_2().py_1().gap_1p5().child("Play Audio From").child(
+            RadioGroup::vertical("play-from")
+                .children(devices.iter().enumerate().map(|(index, device)| {
+                    Radio::new(index).label(device.name.clone()).small().w_full().text_size(px(12.))
+                }))
+                .selected_index(devices.iter().position(|device| device.playing))
+                .on_change(move |&index, _, cx| {
+                    if let Some(id) = ids.get(index) {
+                        headset.update(cx, |headset, cx| headset.change(Setting::PlayFrom(id.clone()), cx));
+                    }
+                }),
+        );
+        Some(row.text_color(p.label))
+    }
+
     /// What the headset's noise control button switches between, once the
     /// headset has said.
     fn noise_button(&self, device: &Device, p: Palette, cx: &App) -> Option<impl IntoElement> {
@@ -415,6 +439,7 @@ impl Panel {
             .when_some(self.equalizer(p, cx), |this, equalizer| this.child(separator(p)).child(equalizer))
             .when_some(self.auto_off(device, p, cx), |this, auto_off| this.child(separator(p)).child(auto_off))
             .when_some(self.noise_button(device, p, cx), |this, button| this.child(separator(p)).child(button))
+            .when_some(self.play_from(p, cx), |this, play_from| this.child(separator(p)).child(play_from))
             .child(separator(p))
             .child(Self::low_battery_alerts(p, cx))
             .into_any_element()

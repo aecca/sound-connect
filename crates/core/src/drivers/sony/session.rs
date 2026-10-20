@@ -7,8 +7,8 @@
 use std::mem::discriminant;
 use std::time::Instant;
 
-use super::command::{Reply, Request, parse};
-use super::frame::{FrameReader, Message};
+use super::command::{Reply, Request, parse, parse_table_2};
+use super::frame::{FrameReader, Message, kind};
 use crate::driver::Frame;
 use crate::queue::StopAndWait;
 
@@ -43,7 +43,13 @@ impl Session {
                 self.requests.complete();
             } else {
                 received.writes.push(Message::ack_for(message.seq).encode());
-                received.replies.extend(parse(&message.payload));
+                // The two tables share opcodes; each is read by its own parser.
+                let reply = match message.kind {
+                    kind::COMMAND => parse(&message.payload),
+                    kind::COMMAND_2 => parse_table_2(&message.payload),
+                    _ => None,
+                };
+                received.replies.extend(reply);
             }
         }
         received.writes.extend(self.send_next(now));
@@ -59,7 +65,7 @@ impl Session {
     }
 
     fn encode(&self, request: &Request) -> Frame {
-        Message::command(self.seq, request.payload()).encode()
+        Message { kind: request.kind(), seq: self.seq, payload: request.payload() }.encode()
     }
 }
 
@@ -96,6 +102,20 @@ mod tests {
         let received = s.receive(&reply, now);
         assert_eq!(received.writes, [Message::ack_for(0).encode()]);
         assert_eq!(received.replies, [Reply::Battery(Battery { level: 33, charging: false })]);
+    }
+
+    #[test]
+    fn reads_each_table_with_its_own_parser() {
+        let now = Instant::now();
+        let mut s = Session::default();
+        // In the second table, f7 0c is another setting, not Speak-to-Chat.
+        let received = s.receive(&Message::command_2(0, vec![0xf7, 0x0c, 0x00]).encode(), now);
+        assert_eq!(received.writes, [Message::ack_for(0).encode()]);
+        assert!(received.replies.is_empty());
+        let received = s.receive(&Message::command(0, vec![0xf7, 0x0c, 0x00, 0x01]).encode(), now);
+        assert_eq!(received.replies, [Reply::SpeakToChat(true)]);
+        // Requests go out in their own table.
+        assert_eq!(s.request(Request::Table2Functions, now), [Message::command_2(0, vec![0x06, 0x00]).encode()]);
     }
 
     #[test]

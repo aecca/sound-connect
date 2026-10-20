@@ -17,6 +17,10 @@ const ESCAPE_MASK: u8 = 0xef;
 pub(super) mod kind {
     pub const ACK: u8 = 0x01;
     pub const COMMAND: u8 = 0x0c;
+    /// Sony's second command table: connected devices, among others. Its
+    /// opcodes overlap the first table's, so a payload means nothing without
+    /// its kind.
+    pub const COMMAND_2: u8 = 0x0e;
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -33,11 +37,19 @@ pub(super) enum FrameError {
     BadLength,
 }
 
+/// Messages as tests write them.
+#[cfg(test)]
 impl Message {
     pub fn command(seq: u8, payload: Vec<u8>) -> Self {
         Self { kind: kind::COMMAND, seq, payload }
     }
 
+    pub fn command_2(seq: u8, payload: Vec<u8>) -> Self {
+        Self { kind: kind::COMMAND_2, seq, payload }
+    }
+}
+
+impl Message {
     /// The acknowledgement the receiver of `seq` must send back.
     pub fn ack_for(seq: u8) -> Self {
         Self { kind: kind::ACK, seq: 1u8.wrapping_sub(seq), payload: Vec::new() }
@@ -166,6 +178,21 @@ mod tests {
         let (first, rest) = bytes.split_at(5);
         assert!(reader.push(first).is_empty());
         assert_eq!(reader.push(rest), vec![Ok(a), Ok(b)]);
+    }
+
+    // The table-2 functions a WF-1000XM5 (firmware 6.1.0) supports, from
+    // SonyHeadphonesClient's test data. Its 0x3d is escaped.
+    #[test]
+    fn reads_second_table_frames() {
+        let bytes = [
+            0x3e, 0x0e, 0x01, 0x00, 0x00, 0x00, 0x19, 0x07, 0x00, 0x0b, 0x42, 0x3d, 0x2d, 0x53, 0xff, 0x54, 0xff, 0xf1,
+            0xff, 0x60, 0xff, 0x61, 0xff, 0xf2, 0xff, 0x63, 0xff, 0xf8, 0x30, 0x32, 0x04, 0x31, 0xff, 0xee, 0x3c,
+        ];
+        let payload = vec![
+            0x07, 0x00, 0x0b, 0x42, 0x3d, 0x53, 0xff, 0x54, 0xff, 0xf1, 0xff, 0x60, 0xff, 0x61, 0xff, 0xf2, 0xff, 0x63,
+            0xff, 0xf8, 0x30, 0x32, 0x04, 0x31, 0xff,
+        ];
+        assert_eq!(FrameReader::default().push(&bytes), vec![Ok(Message::command_2(1, payload))]);
     }
 
     #[test]

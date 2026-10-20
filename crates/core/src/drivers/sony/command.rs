@@ -5,7 +5,8 @@
 //! checked against a WH-1000XM5. Layouts only other models use are marked as
 //! such and haven't been tried on hardware by this project.
 
-use crate::device::{AutoOff, Battery, ListeningMode, NoiseButton, SpeakToChatEnd, VoiceSensitivity};
+use super::frame::kind;
+use crate::device::{AutoOff, Battery, ConnectedDevice, ListeningMode, NoiseButton, SpeakToChatEnd, VoiceSensitivity};
 use crate::equalizer::{EqBands, EqLayout, EqPreset, Equalizer};
 
 /// How a headset lays out its noise-control message. Read from its replies
@@ -18,6 +19,14 @@ pub(super) enum NoiseLayout {
     /// `.. on, ambient, wind, focus, level` (WF-1000XM4 and WF-1000XM5, per
     /// Gadgetbridge).
     WithWind,
+}
+
+/// How a headset lists the devices it's paired with: with each one's
+/// Bluetooth class or without, depending on the model.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum DeviceList {
+    Classic,
+    WithClass,
 }
 
 /// Speak-to-Chat's options travel together, like the noise-control state.
@@ -68,15 +77,24 @@ pub(super) enum Request {
     SetAutoOff(AutoOff),
     NoiseButton,
     SetNoiseButton(NoiseButton),
+    /// Which functions of the second command table the headset has.
+    Table2Functions,
+    /// The devices it's paired with, and which it's connected to.
+    ConnectedDevices(DeviceList),
+    /// Play the audio of the connected device with this address, as the
+    /// headset writes it: "AA:BB:CC:DD:EE:FF".
+    PlayFrom([u8; 17]),
 }
 
 /// What the headset sent.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum Reply {
     /// The handshake's answer. `v2` is false for older headsets, which this
-    /// app doesn't support yet.
+    /// app doesn't support yet; `table2` says whether it has the second
+    /// command table.
     Ready {
         v2: bool,
+        table2: bool,
     },
     Firmware(String),
     Battery(Battery),
@@ -95,6 +113,11 @@ pub(super) enum Reply {
     PauseWhenTakenOff(bool),
     AutoOff(AutoOff),
     NoiseButton(NoiseButton),
+    Table2Functions(Vec<u8>),
+    ConnectedDevices(Vec<ConnectedDevice>),
+    /// The headset answered a [`Request::PlayFrom`], whether or not it could
+    /// switch (it can't during a call, for one).
+    PlayedFrom,
 }
 
 /// Noise-control "inquired type" used by v2 headsets. 0x15 gets no reply on
@@ -121,7 +144,22 @@ const BATTERY_EARBUDS: u8 = 0x09;
 const BATTERY_EARBUDS_ALT: u8 = 0x01;
 const BATTERY_CASE: u8 = 0x0a;
 
+/// Second-table functions for listing the devices a headset is paired with.
+const DEVICE_LIST_CLASSIC: u8 = 0x30;
+const DEVICE_LIST_WITH_CLASS: [u8; 2] = [0x32, 0x33];
+/// Switching which connected device plays, among the second table's
+/// peripheral settings.
+const PLAYBACK_DEVICE: u8 = 0x01;
+
 impl Request {
+    /// The command table it's in, as a frame's kind.
+    pub fn kind(&self) -> u8 {
+        match self {
+            Self::Table2Functions | Self::ConnectedDevices(_) | Self::PlayFrom(_) => kind::COMMAND_2,
+            _ => kind::COMMAND,
+        }
+    }
+
     pub fn payload(&self) -> Vec<u8> {
         match self {
             Self::Init => vec![0x00, 0x00],
@@ -165,7 +203,28 @@ impl Request {
             }
             Self::NoiseButton => vec![0x66, NOISE_BUTTON],
             Self::SetNoiseButton(choice) => vec![0x68, NOISE_BUTTON, noise_button_code(*choice)],
+            Self::Table2Functions => vec![0x06, 0x00],
+            Self::ConnectedDevices(list) => vec![0x36, device_list_code(*list)],
+            Self::PlayFrom(address) => [&[0x3c, PLAYBACK_DEVICE][..], address].concat(),
         }
+    }
+}
+
+/// How a headset lists its devices, from the second-table functions it has.
+pub(super) fn device_list(functions: &[u8]) -> Option<DeviceList> {
+    if functions.iter().any(|function| DEVICE_LIST_WITH_CLASS.contains(function)) {
+        Some(DeviceList::WithClass)
+    } else if functions.contains(&DEVICE_LIST_CLASSIC) {
+        Some(DeviceList::Classic)
+    } else {
+        None
+    }
+}
+
+fn device_list_code(list: DeviceList) -> u8 {
+    match list {
+        DeviceList::Classic => 0x00,
+        DeviceList::WithClass => 0x02,
     }
 }
 
@@ -269,7 +328,8 @@ fn codec_name(code: u8) -> String {
 pub(super) fn parse(p: &[u8]) -> Option<Reply> {
     let battery = |i: usize| Battery { level: p[i], charging: p[i + 1] == 1 };
     match *p.first()? {
-        0x01 => Some(Reply::Ready { v2: p.len() == 8 }),
+        // The last byte is 0x00 when the second table is there.
+        0x01 => Some(Reply::Ready { v2: p.len() == 8, table2: p.len() == 8 && p[7] == 0x00 }),
         0x05 if p.len() > 3 && p[1] == 0x02 => Some(Reply::Firmware(String::from_utf8_lossy(&p[3..]).into_owned())),
         0x23 | 0x25 if p.len() >= 4 => match p[1] {
             BATTERY_SINGLE => Some(Reply::Battery(battery(2))),
@@ -325,6 +385,52 @@ pub(super) fn parse(p: &[u8]) -> Option<Reply> {
     }
 }
 
+/// Parses a reply or notification from the second command table, per
+/// SonyHeadphonesClient, checked against messages captured from a WF-1000XM5.
+pub(super) fn parse_table_2(p: &[u8]) -> Option<Reply> {
+    match *p.first()? {
+        // The functions and a priority for each.
+        0x07 if p.len() >= 3 && p[1] == 0x00 => {
+            let count = usize::from(p[2]);
+            Some(Reply::Table2Functions(p[3..].chunks_exact(2).take(count).map(|pair| pair[0]).collect()))
+        }
+        0x37 | 0x39 if p.len() >= 3 && [0x00, 0x02].contains(&p[1]) => {
+            connected_devices(&p[2..], p[1] == 0x02).map(Reply::ConnectedDevices)
+        }
+        0x3d if p.len() >= 2 && p[1] == PLAYBACK_DEVICE => Some(Reply::PlayedFrom),
+        _ => None,
+    }
+}
+
+/// `<count>`, then for each paired device its address as 17 characters, the
+/// slot it's connected in (0 when it isn't), its class (3 bytes, in the
+/// layout that has it), and its name after its length; then the slot whose
+/// audio plays. Only the connected devices come back.
+fn connected_devices(p: &[u8], with_class: bool) -> Option<Vec<ConnectedDevice>> {
+    let (&count, mut rest) = p.split_first()?;
+    let mut paired = Vec::new();
+    for _ in 0..count {
+        let (address, after) = rest.split_at_checked(17)?;
+        let (&slot, after) = after.split_first()?;
+        let after = if with_class { after.get(3..)? } else { after };
+        let (&length, after) = after.split_first()?;
+        let (name, after) = after.split_at_checked(length.into())?;
+        paired.push((address, slot, name));
+        rest = after;
+    }
+    let &playing = rest.first()?;
+    let connected = paired.into_iter().filter(|&(_, slot, _)| slot != 0);
+    Some(
+        connected
+            .map(|(address, slot, name)| ConnectedDevice {
+                id: String::from_utf8_lossy(address).into_owned(),
+                name: String::from_utf8_lossy(name).into_owned(),
+                playing: slot == playing,
+            })
+            .collect(),
+    )
+}
+
 fn noise_mode(on: u8, ambient: u8, wind: Option<u8>) -> ListeningMode {
     match (on, ambient, wind) {
         (0, _, _) => ListeningMode::Off,
@@ -345,7 +451,10 @@ mod tests {
     // Replies captured from a WH-1000XM5 (firmware 2.4.1).
     #[test]
     fn parses_real_replies() {
-        assert_eq!(parse(&[0x01, 0x00, 0x03, 0x00, 0x20, 0x16, 0x00, 0x00]), Some(Reply::Ready { v2: true }));
+        assert_eq!(
+            parse(&[0x01, 0x00, 0x03, 0x00, 0x20, 0x16, 0x00, 0x00]),
+            Some(Reply::Ready { v2: true, table2: true })
+        );
         assert_eq!(parse(&[0x05, 0x02, 0x05, b'2', b'.', b'4', b'.', b'1']), Some(Reply::Firmware("2.4.1".into())));
         assert_eq!(parse(&[0x23, 0x00, 0x21, 0x00]), Some(Reply::Battery(Battery { level: 33, charging: false })));
         assert_eq!(parse(&[0x13, 0x02, 0x02]), Some(Reply::Codec("AAC".into())));
@@ -514,6 +623,73 @@ mod tests {
     fn encodes_and_parses_dsee() {
         assert_eq!(Request::SetDsee(true).payload(), [0xe8, 0x01, 0x01]);
         assert_eq!(parse(&[0xe9, 0x01, 0x01]), Some(Reply::Dsee(true)));
+    }
+
+    /// A device list in the layout a WF-1000XM5 sends (firmware 6.1.0, per
+    /// SonyHeadphonesClient's test data), with made-up devices.
+    fn listed(entries: &[(&str, u8, &str)], playing: u8) -> Vec<u8> {
+        let mut p = vec![0x37, 0x02, u8::try_from(entries.len()).unwrap()];
+        for (address, slot, name) in entries {
+            p.extend(address.as_bytes());
+            p.push(*slot);
+            p.extend([0x5a, 0x02, 0x0c]);
+            p.push(u8::try_from(name.len()).unwrap());
+            p.extend(name.as_bytes());
+        }
+        p.push(playing);
+        p
+    }
+
+    #[test]
+    fn parses_the_connected_devices() {
+        let list = listed(
+            &[
+                ("11:22:33:44:55:66", 1, "Laptop"),
+                ("AA:BB:CC:DD:EE:FF", 2, "Phone"),
+                ("00:11:22:33:44:55", 0, "Old PC"),
+            ],
+            2,
+        );
+        let device = |id: &str, name: &str, playing| ConnectedDevice { id: id.into(), name: name.into(), playing };
+        assert_eq!(
+            parse_table_2(&list),
+            Some(Reply::ConnectedDevices(vec![
+                device("11:22:33:44:55:66", "Laptop", false),
+                device("AA:BB:CC:DD:EE:FF", "Phone", true),
+            ]))
+        );
+        // The layout without each device's class.
+        let classic = [&[0x39, 0x00, 0x01][..], b"11:22:33:44:55:66", &[0x01, 0x06], b"Laptop", &[0x01]].concat();
+        assert_eq!(
+            parse_table_2(&classic),
+            Some(Reply::ConnectedDevices(vec![device("11:22:33:44:55:66", "Laptop", true)]))
+        );
+        // Cut short.
+        assert_eq!(parse_table_2(&list[..list.len() - 1]), None);
+    }
+
+    #[test]
+    fn reads_which_second_table_functions_there_are() {
+        // Captured from a WF-1000XM5 (firmware 6.1.0).
+        let functions = parse_table_2(&[
+            0x07, 0x00, 0x0b, 0x42, 0x3d, 0x53, 0xff, 0x54, 0xff, 0xf1, 0xff, 0x60, 0xff, 0x61, 0xff, 0xf2, 0xff, 0x63,
+            0xff, 0xf8, 0x30, 0x32, 0x04, 0x31, 0xff,
+        ]);
+        let Some(Reply::Table2Functions(functions)) = functions else { panic!("not parsed: {functions:?}") };
+        assert_eq!(functions, [0x42, 0x53, 0x54, 0xf1, 0x60, 0x61, 0xf2, 0x63, 0xf8, 0x32, 0x31]);
+        assert_eq!(device_list(&functions), Some(DeviceList::WithClass));
+        assert_eq!(device_list(&[0x30, 0x31]), Some(DeviceList::Classic));
+        assert_eq!(device_list(&[0x42]), None);
+    }
+
+    #[test]
+    fn switches_which_device_plays() {
+        let request = Request::PlayFrom(*b"AA:BB:CC:DD:EE:FF");
+        assert_eq!(request.kind(), kind::COMMAND_2);
+        assert_eq!(request.payload(), [&[0x3c, 0x01][..], b"AA:BB:CC:DD:EE:FF"].concat());
+        assert_eq!(Request::ConnectedDevices(DeviceList::WithClass).payload(), [0x36, 0x02]);
+        assert_eq!(Request::Battery.kind(), kind::COMMAND);
+        assert_eq!(parse_table_2(&[0x3d, 0x01, 0x02]), Some(Reply::PlayedFrom));
     }
 
     #[test]

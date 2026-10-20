@@ -10,8 +10,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Instant;
 
 use sc_core::{
-    Battery, BatteryLayout, Brand, Driver, EqLayout, Feature, ListeningMode, NoiseButton, SpeakToChatEnd,
-    VoiceSensitivity,
+    Battery, BatteryLayout, Brand, ConnectedDevice, Driver, EqLayout, Feature, ListeningMode, NoiseButton,
+    SpeakToChatEnd, VoiceSensitivity,
 };
 
 uniffi::setup_scaffolding!();
@@ -81,6 +81,13 @@ pub enum EqLayout {
 pub struct Battery {
     level: u8,
     charging: bool,
+}
+
+#[uniffi::remote(Record)]
+pub struct ConnectedDevice {
+    id: String,
+    name: String,
+    playing: bool,
 }
 
 // Types that need a shape Swift can take: ranges, static strings, fixed-size
@@ -174,6 +181,7 @@ pub enum Update {
     VoiceSensitivity { sensitivity: VoiceSensitivity },
     SpeakToChatEnd { end: SpeakToChatEnd },
     Equalizer { equalizer: Equalizer },
+    ConnectedDevices { devices: Vec<ConnectedDevice> },
 }
 
 /// Something the user changed. See `sc_core::Setting`.
@@ -189,6 +197,7 @@ pub enum Setting {
     SpeakToChatEnd { end: SpeakToChatEnd },
     EqualizerPreset { preset: EqPreset },
     EqualizerBands { bands: EqBands },
+    PlayFrom { id: String },
 }
 
 /// What to do after the headset said something: frames to write, in order,
@@ -497,6 +506,7 @@ impl From<sc_core::Update> for Update {
             U::VoiceSensitivity(sensitivity) => Self::VoiceSensitivity { sensitivity },
             U::SpeakToChatEnd(end) => Self::SpeakToChatEnd { end },
             U::Equalizer(equalizer) => Self::Equalizer { equalizer: equalizer.into() },
+            U::ConnectedDevices(devices) => Self::ConnectedDevices { devices },
         }
     }
 }
@@ -514,6 +524,7 @@ impl From<Setting> for sc_core::Setting {
             Setting::SpeakToChatEnd { end } => Self::SpeakToChatEnd(end),
             Setting::EqualizerPreset { preset } => Self::EqualizerPreset(preset.into()),
             Setting::EqualizerBands { bands } => Self::EqualizerBands(bands.into()),
+            Setting::PlayFrom { id } => Self::PlayFrom(id),
         }
     }
 }

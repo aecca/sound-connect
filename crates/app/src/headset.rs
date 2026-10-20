@@ -8,8 +8,8 @@ use std::sync::mpsc;
 use gpui_kit::*;
 use sc_bluetooth::{Event, Request};
 use sc_core::{
-    AutoOff, Battery, Device, EqPreset, Equalizer, Feature, ListeningMode, NoiseButton, Setting, SpeakToChatEnd,
-    Update, VoiceSensitivity,
+    AutoOff, Battery, ConnectedDevice, Device, EqPreset, Equalizer, Feature, ListeningMode, NoiseButton, Setting,
+    SpeakToChatEnd, Update, VoiceSensitivity,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -40,6 +40,8 @@ pub struct Headset {
     pub voice_sensitivity: Option<VoiceSensitivity>,
     pub speak_to_chat_end: Option<SpeakToChatEnd>,
     pub equalizer: Option<Equalizer>,
+    /// The devices the headset is connected to, when it says.
+    pub connected_devices: Vec<ConnectedDevice>,
     /// Supported headsets paired with this computer but not connected.
     pub paired: Vec<String>,
     /// The paired headset the user asked to connect, while that's under way.
@@ -69,6 +71,7 @@ impl Headset {
             voice_sensitivity: None,
             speak_to_chat_end: None,
             equalizer: None,
+            connected_devices: Vec::new(),
             paired: Vec::new(),
             connecting: None,
             notice: None,
@@ -119,6 +122,7 @@ impl Headset {
             Update::VoiceSensitivity(sensitivity) => self.voice_sensitivity = Some(sensitivity),
             Update::SpeakToChatEnd(end) => self.speak_to_chat_end = Some(end),
             Update::Equalizer(equalizer) => self.equalizer = Some(equalizer),
+            Update::ConnectedDevices(devices) => self.connected_devices = devices,
             // Not shown on Linux.
             Update::Firmware(_) => {}
         }
@@ -137,16 +141,16 @@ impl Headset {
     /// Applies a change the user made and sends it to the headset, unless
     /// nothing actually changed (a slider reports every position).
     pub fn change(&mut self, setting: Setting, cx: &mut Context<Self>) {
-        let changed = match setting {
-            Setting::Mode(mode) => self.mode.replace(mode) != Some(mode),
-            Setting::AmbientLevel(level) => self.ambient_level.replace(level) != Some(level),
-            Setting::FocusOnVoice(on) => self.focus_on_voice.replace(on) != Some(on),
-            Setting::Feature(feature, on) => self.features.insert(feature, on) != Some(on),
-            Setting::AutoOff(auto_off) => self.auto_off.replace(auto_off) != Some(auto_off),
-            Setting::NoiseButton(choice) => self.noise_button.replace(choice) != Some(choice),
-            Setting::VoiceSensitivity(sensitivity) => self.voice_sensitivity.replace(sensitivity) != Some(sensitivity),
-            Setting::SpeakToChatEnd(end) => self.speak_to_chat_end.replace(end) != Some(end),
-            Setting::EqualizerPreset(preset) => match &mut self.equalizer {
+        let changed = match &setting {
+            &Setting::Mode(mode) => self.mode.replace(mode) != Some(mode),
+            &Setting::AmbientLevel(level) => self.ambient_level.replace(level) != Some(level),
+            &Setting::FocusOnVoice(on) => self.focus_on_voice.replace(on) != Some(on),
+            &Setting::Feature(feature, on) => self.features.insert(feature, on) != Some(on),
+            &Setting::AutoOff(auto_off) => self.auto_off.replace(auto_off) != Some(auto_off),
+            &Setting::NoiseButton(choice) => self.noise_button.replace(choice) != Some(choice),
+            &Setting::VoiceSensitivity(sensitivity) => self.voice_sensitivity.replace(sensitivity) != Some(sensitivity),
+            &Setting::SpeakToChatEnd(end) => self.speak_to_chat_end.replace(end) != Some(end),
+            &Setting::EqualizerPreset(preset) => match &mut self.equalizer {
                 Some(equalizer) if equalizer.preset != preset => {
                     equalizer.preset = preset;
                     true
@@ -154,9 +158,16 @@ impl Headset {
                 _ => false,
             },
             // Moving a band switches to the manual preset.
-            Setting::EqualizerBands(bands) => {
+            &Setting::EqualizerBands(bands) => {
                 let manual = Equalizer { preset: EqPreset::Manual, bands };
                 self.equalizer.is_some() && self.equalizer.replace(manual) != Some(manual)
+            }
+            Setting::PlayFrom(id) => {
+                let changed = self.connected_devices.iter().any(|device| device.id == *id && !device.playing);
+                for device in &mut self.connected_devices {
+                    device.playing = device.id == *id;
+                }
+                changed
             }
         };
         if changed {

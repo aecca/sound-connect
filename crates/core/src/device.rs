@@ -265,6 +265,17 @@ impl SpeakToChatEnd {
     }
 }
 
+/// A device the headset is connected to; with multipoint, two at once, one
+/// of them usually this computer.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ConnectedDevice {
+    /// How the headset tells it apart, for [`Setting::PlayFrom`].
+    pub id: String,
+    pub name: String,
+    /// The headset plays this device's audio.
+    pub playing: bool,
+}
+
 /// Something the headset reported.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Update {
@@ -291,6 +302,8 @@ pub enum Update {
     VoiceSensitivity(VoiceSensitivity),
     SpeakToChatEnd(SpeakToChatEnd),
     Equalizer(Equalizer),
+    /// The devices it's connected to, when it says.
+    ConnectedDevices(Vec<ConnectedDevice>),
 }
 
 /// Something the user changed.
@@ -306,6 +319,9 @@ pub enum Setting {
     SpeakToChatEnd(SpeakToChatEnd),
     EqualizerPreset(EqPreset),
     EqualizerBands(EqBands),
+    /// Play the audio of this connected device, by its
+    /// [`id`](ConnectedDevice::id).
+    PlayFrom(String),
 }
 
 #[cfg(test)]

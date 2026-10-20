@@ -32,6 +32,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     private var presetItems: [(EqPreset, NSMenuItem)] = []
     private var autoOffItem: NSMenuItem?
     private var autoOffItems: [(AutoOff, NSMenuItem)] = []
+    private var playFromItem: NSMenuItem?
     private var noiseButtonItem: NSMenuItem?
     private var noiseButtonItems: [(NoiseButton, NSMenuItem)] = []
     private var shortcutItem: NSMenuItem?
@@ -145,6 +146,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         presetItems = []
         autoOffItem = nil
         autoOffItems = []
+        playFromItem = nil
         noiseButtonItem = nil
         noiseButtonItems = []
 
@@ -211,6 +213,14 @@ final class StatusMenu: NSObject, NSMenuDelegate {
                 noiseButtonItem = item
                 menu.addItem(item)
             }
+            // Which of the devices the headset is connected to it plays; shown
+            // once it's connected to more than this Mac.
+            let playFrom = NSMenuItem(title: "Play Audio From", action: nil, keyEquivalent: "")
+            playFrom.image = symbol("laptopcomputer.and.iphone")
+            playFrom.submenu = NSMenu()
+            playFrom.submenu?.autoenablesItems = false
+            playFromItem = playFrom
+            menu.addItem(playFrom)
         }
 
         menu.addItem(.separator())
@@ -299,6 +309,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         for (choice, item) in autoOffItems {
             item.state = model.autoOff == choice ? .on : .off
         }
+        updatePlayFrom()
         noiseButtonItem?.isHidden = model.noiseButton == nil
         for (choice, item) in noiseButtonItems {
             item.state = model.noiseButton == choice ? .on : .off
@@ -329,6 +340,20 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             autoOffItems.append((choice, item))
         }
         return submenu
+    }
+
+    /// The connected devices change while the menu stays as it is, so their
+    /// items are rebuilt each time.
+    private func updatePlayFrom() {
+        guard let playFromItem, let submenu = playFromItem.submenu else { return }
+        playFromItem.isHidden = model.connectedDevices.count < 2
+        submenu.removeAllItems()
+        for device in model.connectedDevices {
+            let item = actionItem(device.name, #selector(playFrom(_:)))
+            item.representedObject = device.id
+            item.state = device.playing ? .on : .off
+            submenu.addItem(item)
+        }
     }
 
     private func speakToChatMenu() -> NSMenu {
@@ -370,7 +395,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             _ = (model.connection, model.device, model.mode, model.ambientLevel, model.focusOnVoice)
             _ = (model.features, model.autoOff, model.noiseButton, model.equalizer, model.disconnectedHeadsets)
             _ = (model.voiceSensitivity, model.speakToChatEnd, model.notice)
-            _ = (model.battery, model.leftBattery, model.rightBattery)
+            _ = (model.battery, model.leftBattery, model.rightBattery, model.connectedDevices)
         } onChange: {
             Task { @MainActor [weak self] in
                 self?.refresh()
@@ -416,6 +441,10 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
     @objc private func selectChatEnd(_ item: NSMenuItem) {
         if let end = item.representedObject as? SpeakToChatEnd { model.change(.speakToChatEnd(end: end)) }
+    }
+
+    @objc private func playFrom(_ item: NSMenuItem) {
+        if let id = item.representedObject as? String { model.change(.playFrom(id: id)) }
     }
 
     @objc private func selectNoiseButton(_ item: NSMenuItem) {
