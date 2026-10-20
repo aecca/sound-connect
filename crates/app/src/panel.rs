@@ -10,7 +10,7 @@ use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{Disableable, Selectable, Sizable, Theme, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use sc_core::{AutoOff, Battery, Device, ListeningMode, Setting};
+use sc_core::{AutoOff, Battery, Device, Feature, ListeningMode, Setting, SpeakToChatEnd, VoiceSensitivity};
 
 use crate::calls::Calls;
 use crate::headset::{Connection, Headset};
@@ -251,29 +251,61 @@ impl Panel {
     /// Shown once the headset has reported it, like the features.
     fn auto_off(&self, device: &Device, p: Palette, cx: &App) -> Option<impl IntoElement> {
         let current = self.headset.read(cx).auto_off.filter(|_| !device.auto_off.is_empty())?;
-        let choices = device.auto_off.clone();
         let headset = self.headset.clone();
         let row = v_flex()
             .px_2()
             .py_1()
             .gap_1p5()
             .child("Turn Off Automatically")
-            .child(
-                ButtonGroup::new("auto-off")
-                    .outline()
-                    .xsmall()
-                    .w_full()
-                    .children(choices.iter().map(|&choice| {
-                        Button::new(choice.name()).label(short_name(choice)).flex_1().selected(current == choice)
-                    }))
-                    .on_click(move |clicked, _, cx| {
-                        if let Some(&choice) = clicked.first().and_then(|&index| choices.get(index)) {
-                            headset.update(cx, |headset, cx| headset.change(Setting::AutoOff(choice), cx));
-                        }
-                    }),
-            )
+            .child(choice_buttons("auto-off", &device.auto_off, current, short_name, false, move |choice, cx| {
+                headset.update(cx, |headset, cx| headset.change(Setting::AutoOff(choice), cx))
+            }))
             .text_color(p.label);
         Some(row)
+    }
+
+    /// Speak-to-Chat's sensitivity and when it ends, once the headset has
+    /// said. Dimmed, like the ambient options, while it's off.
+    fn speak_to_chat_options(&self, device: &Device, p: Palette, cx: &App) -> Option<impl IntoElement> {
+        let headset = self.headset.read(cx);
+        let (Some(sensitivity), Some(end)) = (headset.voice_sensitivity, headset.speak_to_chat_end) else {
+            return None;
+        };
+        if !device.speak_to_chat_options {
+            return None;
+        }
+        let on = headset.features.get(&Feature::SpeakToChat) == Some(&true);
+        let (for_sensitivity, for_end) = (self.headset.clone(), self.headset.clone());
+        let set_sensitivity = move |sensitivity, cx: &mut App| {
+            for_sensitivity.update(cx, |headset, cx| headset.change(Setting::VoiceSensitivity(sensitivity), cx))
+        };
+        let set_end =
+            move |end, cx: &mut App| for_end.update(cx, |headset, cx| headset.change(Setting::SpeakToChatEnd(end), cx));
+        let options = v_flex()
+            .px_2()
+            .py_1()
+            .gap_1p5()
+            .when(!on, |this| this.opacity(0.4))
+            .child("Speak-to-Chat Sensitivity")
+            .child(choice_buttons(
+                "voice-sensitivity",
+                &VoiceSensitivity::ALL,
+                sensitivity,
+                |s| s.name().into(),
+                !on,
+                set_sensitivity,
+            ))
+            .child("Back to the Previous Mode")
+            .child(choice_buttons(
+                "speak-to-chat-end",
+                &SpeakToChatEnd::ALL,
+                end,
+                |end| short_end_name(end).into(),
+                !on,
+                set_end,
+            ))
+            .text_color(p.label);
+        Some(options)
     }
 
     /// What the headset's noise control button switches between, once the
@@ -317,6 +349,7 @@ impl Panel {
             .when_some(device.ambient.as_ref(), |this, ambient| this.child(self.ambient(ambient.focus_on_voice, p, cx)))
             .children(self.calls(p, cx))
             .when(!device.features.is_empty(), |this| this.child(separator(p)).child(self.features(device, p, cx)))
+            .children(self.speak_to_chat_options(device, p, cx))
             .when_some(self.auto_off(device, p, cx), |this, auto_off| this.child(separator(p)).child(auto_off))
             .when_some(self.noise_button(device, p, cx), |this, button| this.child(separator(p)).child(button))
             .child(separator(p))
@@ -409,12 +442,49 @@ fn mode_icon(mode: ListeningMode) -> &'static str {
     }
 }
 
+/// A row of buttons, one per choice, with `current` selected.
+fn choice_buttons<T: Copy + PartialEq + 'static>(
+    id: &'static str,
+    choices: &[T],
+    current: T,
+    label: impl Fn(T) -> SharedString,
+    disabled: bool,
+    on_choose: impl Fn(T, &mut App) + 'static,
+) -> impl IntoElement {
+    let choices = choices.to_vec();
+    ButtonGroup::new(id)
+        .outline()
+        .xsmall()
+        .w_full()
+        .disabled(disabled)
+        .children(
+            choices
+                .iter()
+                .enumerate()
+                .map(|(index, &choice)| Button::new(index).label(label(choice)).flex_1().selected(choice == current)),
+        )
+        .on_click(move |clicked, _, cx| {
+            if let Some(&choice) = clicked.first().and_then(|&index| choices.get(index)) {
+                on_choose(choice, cx);
+            }
+        })
+}
+
+fn short_end_name(end: SpeakToChatEnd) -> &'static str {
+    match end {
+        SpeakToChatEnd::Short => "15 s",
+        SpeakToChatEnd::Standard => "30 s",
+        SpeakToChatEnd::Long => "1 min",
+        SpeakToChatEnd::Never => "Never",
+    }
+}
+
 /// Auto-off choices short enough to sit side by side.
-fn short_name(auto_off: AutoOff) -> String {
+fn short_name(auto_off: AutoOff) -> SharedString {
     match auto_off {
         AutoOff::Never => "Never".into(),
-        AutoOff::Minutes(minutes) if minutes % 60 == 0 => format!("{}h", minutes / 60),
-        AutoOff::Minutes(minutes) => format!("{minutes}m"),
+        AutoOff::Minutes(minutes) if minutes % 60 == 0 => format!("{}h", minutes / 60).into(),
+        AutoOff::Minutes(minutes) => format!("{minutes}m").into(),
         AutoOff::WhenTakenOff => "When taken off".into(),
     }
 }

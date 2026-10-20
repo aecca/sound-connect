@@ -26,6 +26,9 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     private var focusItem: NSMenuItem?
     private var callsItem: NSMenuItem?
     private var featureItems: [(Feature, NSMenuItem)] = []
+    private var chatOptionsItem: NSMenuItem?
+    private var sensitivityItems: [(VoiceSensitivity, NSMenuItem)] = []
+    private var chatEndItems: [(SpeakToChatEnd, NSMenuItem)] = []
     private var presetItems: [(EqPreset, NSMenuItem)] = []
     private var autoOffItem: NSMenuItem?
     private var autoOffItems: [(AutoOff, NSMenuItem)] = []
@@ -121,6 +124,9 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         focusItem = nil
         callsItem = nil
         featureItems = []
+        chatOptionsItem = nil
+        sensitivityItems = []
+        chatEndItems = []
         presetItems = []
         autoOffItem = nil
         autoOffItems = []
@@ -159,6 +165,13 @@ final class StatusMenu: NSObject, NSMenuDelegate {
                     item.toolTip = featureDescription(feature: feature)
                     menu.addItem(item)
                     featureItems.append((feature, item))
+                }
+                if device.speakToChatOptions {
+                    let item = NSMenuItem(title: "Speak-to-Chat Options", action: nil, keyEquivalent: "")
+                    item.indentationLevel = 1
+                    item.submenu = speakToChatMenu()
+                    chatOptionsItem = item
+                    menu.addItem(item)
                 }
             }
             if device.equalizer != nil {
@@ -253,6 +266,13 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             item.isHidden = model.features[feature] == nil
             item.state = model.features[feature] == true ? .on : .off
         }
+        chatOptionsItem?.isHidden = model.voiceSensitivity == nil || model.features[.speakToChat] != true
+        for (sensitivity, item) in sensitivityItems {
+            item.state = model.voiceSensitivity == sensitivity ? .on : .off
+        }
+        for (end, item) in chatEndItems {
+            item.state = model.speakToChatEnd == end ? .on : .off
+        }
         for (preset, item) in presetItems {
             item.state = model.equalizer?.preset == preset ? .on : .off
         }
@@ -293,6 +313,27 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         return submenu
     }
 
+    private func speakToChatMenu() -> NSMenu {
+        let submenu = NSMenu()
+        submenu.autoenablesItems = false
+        submenu.addItem(.sectionHeader(title: "Sensitivity"))
+        for sensitivity in voiceSensitivities() {
+            let item = actionItem(voiceSensitivityName(sensitivity: sensitivity), #selector(selectSensitivity(_:)))
+            item.representedObject = sensitivity
+            submenu.addItem(item)
+            sensitivityItems.append((sensitivity, item))
+        }
+        submenu.addItem(.separator())
+        submenu.addItem(.sectionHeader(title: "Back to the Previous Mode"))
+        for end in speakToChatEnds() {
+            let item = actionItem(speakToChatEndName(end: end), #selector(selectChatEnd(_:)))
+            item.representedObject = end
+            submenu.addItem(item)
+            chatEndItems.append((end, item))
+        }
+        return submenu
+    }
+
     private func noiseButtonMenu(_ choices: [NoiseButton]) -> NSMenu {
         let submenu = NSMenu()
         submenu.autoenablesItems = false
@@ -310,7 +351,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         withObservationTracking {
             _ = (model.connection, model.device, model.mode, model.ambientLevel, model.focusOnVoice)
             _ = (model.features, model.autoOff, model.noiseButton, model.equalizer, model.disconnectedHeadsets)
-            _ = model.notice
+            _ = (model.voiceSensitivity, model.speakToChatEnd, model.notice)
         } onChange: {
             Task { @MainActor [weak self] in
                 self?.refresh()
@@ -346,6 +387,16 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
     @objc private func selectAutoOff(_ item: NSMenuItem) {
         if let choice = item.representedObject as? AutoOff { model.change(.autoOff(autoOff: choice)) }
+    }
+
+    @objc private func selectSensitivity(_ item: NSMenuItem) {
+        if let sensitivity = item.representedObject as? VoiceSensitivity {
+            model.change(.voiceSensitivity(sensitivity: sensitivity))
+        }
+    }
+
+    @objc private func selectChatEnd(_ item: NSMenuItem) {
+        if let end = item.representedObject as? SpeakToChatEnd { model.change(.speakToChatEnd(end: end)) }
     }
 
     @objc private func selectNoiseButton(_ item: NSMenuItem) {

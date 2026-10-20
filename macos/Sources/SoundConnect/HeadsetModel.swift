@@ -35,6 +35,8 @@ final class HeadsetModel {
     var features: [Feature: Bool] = [:]
     var autoOff: AutoOff?
     var noiseButton: NoiseButton?
+    var voiceSensitivity: VoiceSensitivity?
+    var speakToChatEnd: SpeakToChatEnd?
     var equalizer: Equalizer?
     /// Supported headsets paired with this Mac but not connected right now.
     var disconnectedHeadsets: [String] = []
@@ -72,6 +74,8 @@ final class HeadsetModel {
         case .feature(let feature, let on): features[feature] = on
         case .autoOff(let value): autoOff = value
         case .noiseButton(let choice): noiseButton = choice
+        case .voiceSensitivity(let sensitivity): voiceSensitivity = sensitivity
+        case .speakToChatEnd(let end): speakToChatEnd = end
         case .equalizer(let value): equalizer = value
         }
     }
@@ -92,6 +96,8 @@ final class HeadsetModel {
         features = [:]
         autoOff = nil
         noiseButton = nil
+        voiceSensitivity = nil
+        speakToChatEnd = nil
         equalizer = nil
     }
 
@@ -125,6 +131,12 @@ final class HeadsetModel {
         case .noiseButton(let choice):
             guard noiseButton != choice else { return }
             noiseButton = choice
+        case .voiceSensitivity(let sensitivity):
+            guard voiceSensitivity != sensitivity else { return }
+            voiceSensitivity = sensitivity
+        case .speakToChatEnd(let end):
+            guard speakToChatEnd != end else { return }
+            speakToChatEnd = end
         case .equalizerPreset(let preset):
             guard var equalizer, equalizer.preset != preset else { return }
             equalizer.preset = preset

@@ -5,7 +5,7 @@
 //! checked against a WH-1000XM5. Layouts only other models use are marked as
 //! such and haven't been tried on hardware by this project.
 
-use crate::device::{AutoOff, Battery, ListeningMode, NoiseButton};
+use crate::device::{AutoOff, Battery, ListeningMode, NoiseButton, SpeakToChatEnd, VoiceSensitivity};
 use crate::equalizer::{EqBands, EqLayout, EqPreset, Equalizer};
 
 /// How a headset lays out its noise-control message. Read from its replies
@@ -18,6 +18,13 @@ pub(super) enum NoiseLayout {
     /// `.. on, ambient, wind, focus, level` (WF-1000XM4 and WF-1000XM5, per
     /// Gadgetbridge).
     WithWind,
+}
+
+/// Speak-to-Chat's options travel together, like the noise-control state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct ChatOptions {
+    pub sensitivity: VoiceSensitivity,
+    pub end: SpeakToChatEnd,
 }
 
 /// Sony sends and takes the whole noise-control state in one message.
@@ -45,6 +52,8 @@ pub(super) enum Request {
     SetNoiseControl(NoiseControl),
     SpeakToChat,
     SetSpeakToChat(bool),
+    SpeakToChatOptions,
+    SetSpeakToChatOptions(ChatOptions),
     Equalizer(EqLayout),
     SetEqualizerPreset(EqLayout, EqPreset),
     /// Switches to the Manual preset with these values.
@@ -80,6 +89,7 @@ pub(super) enum Reply {
     Codec(String),
     NoiseControl(NoiseControl),
     SpeakToChat(bool),
+    SpeakToChatOptions(ChatOptions),
     Equalizer(Equalizer),
     Dsee(bool),
     PauseWhenTakenOff(bool),
@@ -124,6 +134,10 @@ impl Request {
             Self::SetNoiseControl(nc) => noise_payload(0x68, nc),
             Self::SpeakToChat => vec![0xf6, SPEAK_TO_CHAT],
             Self::SetSpeakToChat(on) => vec![0xf8, SPEAK_TO_CHAT, u8::from(!on), 0x01],
+            Self::SpeakToChatOptions => vec![0xfa, SPEAK_TO_CHAT],
+            Self::SetSpeakToChatOptions(options) => {
+                vec![0xfc, SPEAK_TO_CHAT, sensitivity_code(options.sensitivity), chat_end_code(options.end)]
+            }
             Self::Equalizer(layout) => vec![0x56, layout_code(*layout)],
             Self::SetEqualizerPreset(layout, preset) => vec![0x58, layout_code(*layout), preset_code(*preset), 0x00],
             Self::SetEqualizerBands(EqBands::Five { clear_bass, bands }) => {
@@ -212,6 +226,23 @@ fn preset_from_code(code: u8) -> EqPreset {
     EqPreset::ALL.into_iter().find(|preset| preset_code(*preset) == code).unwrap_or(EqPreset::Unknown(code))
 }
 
+fn sensitivity_code(sensitivity: VoiceSensitivity) -> u8 {
+    match sensitivity {
+        VoiceSensitivity::Auto => 0x00,
+        VoiceSensitivity::High => 0x01,
+        VoiceSensitivity::Low => 0x02,
+    }
+}
+
+fn chat_end_code(end: SpeakToChatEnd) -> u8 {
+    match end {
+        SpeakToChatEnd::Short => 0x00,
+        SpeakToChatEnd::Standard => 0x01,
+        SpeakToChatEnd::Long => 0x02,
+        SpeakToChatEnd::Never => 0x03,
+    }
+}
+
 /// 0x00 would make the button do nothing, which isn't offered.
 fn noise_button_code(choice: NoiseButton) -> u8 {
     match choice {
@@ -264,6 +295,11 @@ pub(super) fn parse(p: &[u8]) -> Option<Reply> {
         })),
         0xf7 | 0xf9 if p.len() >= 3 && p[1] == SPEAK_TO_CHAT => Some(Reply::SpeakToChat(p[2] == 0x00)),
         0xf7 | 0xf9 if p.len() == 3 && p[1] == PAUSE_WHEN_TAKEN_OFF => Some(Reply::PauseWhenTakenOff(p[2] == 0x00)),
+        0xfb | 0xfd if p.len() == 4 && p[1] == SPEAK_TO_CHAT => {
+            let sensitivity = VoiceSensitivity::ALL.into_iter().find(|&s| sensitivity_code(s) == p[2])?;
+            let end = SpeakToChatEnd::ALL.into_iter().find(|&end| chat_end_code(end) == p[3])?;
+            Some(Reply::SpeakToChatOptions(ChatOptions { sensitivity, end }))
+        }
         0x67 | 0x69 if p.len() == 3 && p[1] == NOISE_BUTTON => {
             NoiseButton::ALL.into_iter().find(|&choice| noise_button_code(choice) == p[2]).map(Reply::NoiseButton)
         }
@@ -379,6 +415,21 @@ mod tests {
         assert_eq!(parse(&[0xf9, 0x0c, 0x01, 0x01]), Some(Reply::SpeakToChat(false)));
         // Other system settings share these opcodes.
         assert_eq!(parse(&[0xf7, 0x01, 0x00, 0x01]), None);
+    }
+
+    // Layout per Gadgetbridge and SonyHeadphonesClient; the first reply was
+    // captured from a WF-1000XM5 (firmware 6.1.0), in SonyHeadphonesClient's
+    // test data.
+    #[test]
+    fn encodes_and_parses_speak_to_chat_options() {
+        let options = |sensitivity, end| Some(Reply::SpeakToChatOptions(ChatOptions { sensitivity, end }));
+        assert_eq!(parse(&[0xfb, 0x0c, 0x00, 0x00]), options(VoiceSensitivity::Auto, SpeakToChatEnd::Short));
+        assert_eq!(parse(&[0xfd, 0x0c, 0x02, 0x03]), options(VoiceSensitivity::Low, SpeakToChatEnd::Never));
+        // The same opcodes carry other settings.
+        assert_eq!(parse(&[0xfb, 0x03, 0x00, 0x00]), None);
+        assert_eq!(Request::SpeakToChatOptions.payload(), [0xfa, 0x0c]);
+        let high_long = ChatOptions { sensitivity: VoiceSensitivity::High, end: SpeakToChatEnd::Long };
+        assert_eq!(Request::SetSpeakToChatOptions(high_long).payload(), [0xfc, 0x0c, 0x01, 0x02]);
     }
 
     // Replies captured from a WF-1000XM5 (firmware 6.1.0), from

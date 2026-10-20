@@ -8,7 +8,7 @@ mod session;
 
 use std::time::Instant;
 
-use command::{NoiseControl, Reply, Request};
+use command::{ChatOptions, NoiseControl, Reply, Request};
 use profile::{Profile, profile_for};
 use session::Session;
 
@@ -28,12 +28,14 @@ pub struct SonyDriver {
     /// Sony takes the whole noise-control state in each change, so the last
     /// one the headset reported is kept to build the next.
     noise: Option<NoiseControl>,
+    /// Likewise for Speak-to-Chat's options.
+    chat: Option<ChatOptions>,
 }
 
 impl SonyDriver {
     pub fn new(name: &str) -> Self {
         let profile = profile_for(name);
-        Self { device: profile.device(name), profile, session: Session::default(), noise: None }
+        Self { device: profile.device(name), profile, session: Session::default(), noise: None, chat: None }
     }
 
     fn request_all(&mut self, requests: Vec<Request>, now: Instant) -> Vec<Frame> {
@@ -49,6 +51,16 @@ impl SonyDriver {
         }
         self.noise = Some(noise);
         self.session.request(Request::SetNoiseControl(noise), now)
+    }
+
+    fn change_chat(&mut self, now: Instant, change: impl FnOnce(&mut ChatOptions)) -> Vec<Frame> {
+        let Some(mut chat) = self.chat.filter(|_| self.device.speak_to_chat_options) else { return Vec::new() };
+        change(&mut chat);
+        if self.chat == Some(chat) {
+            return Vec::new();
+        }
+        self.chat = Some(chat);
+        self.session.request(Request::SetSpeakToChatOptions(chat), now)
     }
 
     fn updates(&mut self, reply: Reply) -> Vec<Update> {
@@ -71,6 +83,10 @@ impl SonyDriver {
                 ]
             }
             Reply::SpeakToChat(on) => vec![Update::Feature(Feature::SpeakToChat, on)],
+            Reply::SpeakToChatOptions(chat) => {
+                self.chat = Some(chat);
+                vec![Update::VoiceSensitivity(chat.sensitivity), Update::SpeakToChatEnd(chat.end)]
+            }
             Reply::Dsee(on) => vec![Update::Feature(Feature::Dsee, on)],
             Reply::Equalizer(equalizer) => vec![Update::Equalizer(equalizer)],
             Reply::PauseWhenTakenOff(on) => vec![Update::Feature(Feature::PauseWhenTakenOff, on)],
@@ -116,6 +132,8 @@ impl Driver for SonyDriver {
             Setting::NoiseButton(choice) if self.device.noise_button.contains(&choice) => {
                 self.session.request(Request::SetNoiseButton(choice), now)
             }
+            Setting::VoiceSensitivity(sensitivity) => self.change_chat(now, |chat| chat.sensitivity = sensitivity),
+            Setting::SpeakToChatEnd(end) => self.change_chat(now, |chat| chat.end = end),
             Setting::EqualizerPreset(preset) => match self.profile.equalizer {
                 Some(layout) => self.session.request(Request::SetEqualizerPreset(layout, preset), now),
                 None => Vec::new(),
@@ -139,7 +157,7 @@ impl Driver for SonyDriver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::device::{AutoOff, Battery, ListeningMode, NoiseButton};
+    use crate::device::{AutoOff, Battery, ListeningMode, NoiseButton, SpeakToChatEnd, VoiceSensitivity};
     use frame::{Message, kind};
 
     /// Feeds the driver what a WH-1000XM5 says: an ACK, then a message.
@@ -193,6 +211,21 @@ mod tests {
         assert!(driver.set(Setting::Feature(Feature::PauseWhenTakenOff, true), now).is_empty());
         assert!(driver.set(Setting::AutoOff(AutoOff::Never), now).is_empty());
         assert!(driver.set(Setting::NoiseButton(NoiseButton::AmbientOff), now).is_empty());
+    }
+
+    #[test]
+    fn changes_speak_to_chat_options_together() {
+        let now = Instant::now();
+        let mut driver = SonyDriver::new("WH-1000XM5");
+        assert!(driver.set(Setting::SpeakToChatEnd(SpeakToChatEnd::Never), now).is_empty());
+
+        let output = headset_says(&mut driver, &[0xfb, 0x0c, 0x01, 0x00], now);
+        assert_eq!(
+            output.updates,
+            [Update::VoiceSensitivity(VoiceSensitivity::High), Update::SpeakToChatEnd(SpeakToChatEnd::Short)]
+        );
+        let frames = driver.set(Setting::SpeakToChatEnd(SpeakToChatEnd::Never), now);
+        assert_eq!(frames, [Message::command(1, vec![0xfc, 0x0c, 0x01, 0x03]).encode()]);
     }
 
     #[test]

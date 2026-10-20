@@ -7,7 +7,9 @@ use std::sync::mpsc;
 
 use gpui_kit::*;
 use sc_bluetooth::Event;
-use sc_core::{AutoOff, Battery, Device, Feature, ListeningMode, NoiseButton, Setting, Update};
+use sc_core::{
+    AutoOff, Battery, Device, Feature, ListeningMode, NoiseButton, Setting, SpeakToChatEnd, Update, VoiceSensitivity,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Connection {
@@ -29,6 +31,8 @@ pub struct Headset {
     pub features: HashMap<Feature, bool>,
     pub auto_off: Option<AutoOff>,
     pub noise_button: Option<NoiseButton>,
+    pub voice_sensitivity: Option<VoiceSensitivity>,
+    pub speak_to_chat_end: Option<SpeakToChatEnd>,
     requests: mpsc::Sender<Setting>,
 }
 
@@ -46,6 +50,8 @@ impl Headset {
             features: HashMap::new(),
             auto_off: None,
             noise_button: None,
+            voice_sensitivity: None,
+            speak_to_chat_end: None,
             requests,
         }
     }
@@ -76,6 +82,8 @@ impl Headset {
             }
             Update::AutoOff(auto_off) => self.auto_off = Some(auto_off),
             Update::NoiseButton(choice) => self.noise_button = Some(choice),
+            Update::VoiceSensitivity(sensitivity) => self.voice_sensitivity = Some(sensitivity),
+            Update::SpeakToChatEnd(end) => self.speak_to_chat_end = Some(end),
             // Not shown in this panel yet.
             Update::Firmware(_) | Update::Earbuds { .. } | Update::CaseBattery(_) | Update::Equalizer(_) => {}
         }
@@ -96,6 +104,8 @@ impl Headset {
             Setting::Feature(feature, on) => self.features.insert(feature, on) != Some(on),
             Setting::AutoOff(auto_off) => self.auto_off.replace(auto_off) != Some(auto_off),
             Setting::NoiseButton(choice) => self.noise_button.replace(choice) != Some(choice),
+            Setting::VoiceSensitivity(sensitivity) => self.voice_sensitivity.replace(sensitivity) != Some(sensitivity),
+            Setting::SpeakToChatEnd(end) => self.speak_to_chat_end.replace(end) != Some(end),
             // This panel has no equalizer; the change still goes through.
             Setting::EqualizerPreset(_) | Setting::EqualizerBands(_) => true,
         };

@@ -9,7 +9,10 @@
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Instant;
 
-use sc_core::{Battery, BatteryLayout, Brand, Driver, EqLayout, Feature, ListeningMode, NoiseButton};
+use sc_core::{
+    Battery, BatteryLayout, Brand, Driver, EqLayout, Feature, ListeningMode, NoiseButton, SpeakToChatEnd,
+    VoiceSensitivity,
+};
 
 uniffi::setup_scaffolding!();
 
@@ -50,6 +53,21 @@ pub enum NoiseButton {
     NoiseCancellingAmbient,
     NoiseCancellingOff,
     AmbientOff,
+}
+
+#[uniffi::remote(Enum)]
+pub enum VoiceSensitivity {
+    Auto,
+    High,
+    Low,
+}
+
+#[uniffi::remote(Enum)]
+pub enum SpeakToChatEnd {
+    Short,
+    Standard,
+    Long,
+    Never,
 }
 
 #[uniffi::remote(Enum)]
@@ -101,6 +119,7 @@ pub struct Device {
     pub features: Vec<Feature>,
     pub auto_off: Vec<AutoOff>,
     pub noise_button: Vec<NoiseButton>,
+    pub speak_to_chat_options: bool,
     pub equalizer: Option<EqLayout>,
 }
 
@@ -151,6 +170,8 @@ pub enum Update {
     Feature { feature: Feature, on: bool },
     AutoOff { auto_off: AutoOff },
     NoiseButton { choice: NoiseButton },
+    VoiceSensitivity { sensitivity: VoiceSensitivity },
+    SpeakToChatEnd { end: SpeakToChatEnd },
     Equalizer { equalizer: Equalizer },
 }
 
@@ -163,6 +184,8 @@ pub enum Setting {
     Feature { feature: Feature, on: bool },
     AutoOff { auto_off: AutoOff },
     NoiseButton { choice: NoiseButton },
+    VoiceSensitivity { sensitivity: VoiceSensitivity },
+    SpeakToChatEnd { end: SpeakToChatEnd },
     EqualizerPreset { preset: EqPreset },
     EqualizerBands { bands: EqBands },
 }
@@ -314,6 +337,26 @@ pub fn noise_button_name(choice: NoiseButton) -> String {
     choice.name().to_owned()
 }
 
+#[uniffi::export]
+pub fn voice_sensitivities() -> Vec<VoiceSensitivity> {
+    VoiceSensitivity::ALL.to_vec()
+}
+
+#[uniffi::export]
+pub fn voice_sensitivity_name(sensitivity: VoiceSensitivity) -> String {
+    sensitivity.name().to_owned()
+}
+
+#[uniffi::export]
+pub fn speak_to_chat_ends() -> Vec<SpeakToChatEnd> {
+    SpeakToChatEnd::ALL.to_vec()
+}
+
+#[uniffi::export]
+pub fn speak_to_chat_end_name(end: SpeakToChatEnd) -> String {
+    end.name().to_owned()
+}
+
 // Conversions to and from the sc-core types.
 
 impl From<sc_core::Device> for Device {
@@ -332,6 +375,7 @@ impl From<sc_core::Device> for Device {
             features: device.features,
             auto_off: device.auto_off.into_iter().map(Into::into).collect(),
             noise_button: device.noise_button,
+            speak_to_chat_options: device.speak_to_chat_options,
             equalizer: device.equalizer,
         }
     }
@@ -449,6 +493,8 @@ impl From<sc_core::Update> for Update {
             U::Feature(feature, on) => Self::Feature { feature, on },
             U::AutoOff(auto_off) => Self::AutoOff { auto_off: auto_off.into() },
             U::NoiseButton(choice) => Self::NoiseButton { choice },
+            U::VoiceSensitivity(sensitivity) => Self::VoiceSensitivity { sensitivity },
+            U::SpeakToChatEnd(end) => Self::SpeakToChatEnd { end },
             U::Equalizer(equalizer) => Self::Equalizer { equalizer: equalizer.into() },
         }
     }
@@ -463,6 +509,8 @@ impl From<Setting> for sc_core::Setting {
             Setting::Feature { feature, on } => Self::Feature(feature, on),
             Setting::AutoOff { auto_off } => Self::AutoOff(auto_off.into()),
             Setting::NoiseButton { choice } => Self::NoiseButton(choice),
+            Setting::VoiceSensitivity { sensitivity } => Self::VoiceSensitivity(sensitivity),
+            Setting::SpeakToChatEnd { end } => Self::SpeakToChatEnd(end),
             Setting::EqualizerPreset { preset } => Self::EqualizerPreset(preset.into()),
             Setting::EqualizerBands { bands } => Self::EqualizerBands(bands.into()),
         }

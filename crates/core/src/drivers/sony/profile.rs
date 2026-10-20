@@ -24,6 +24,8 @@ pub(super) struct Profile {
     pub wear_sensor: bool,
     /// What its NC/AMB button switches between can be changed.
     pub noise_button: bool,
+    /// How Speak-to-Chat listens and when it ends can be changed.
+    pub speak_to_chat_options: bool,
 }
 
 /// Headsets that aren't in the list get the WH-1000XM5's feature set, the
@@ -38,29 +40,34 @@ const UNKNOWN: Profile = Profile {
     dsee: true,
     wear_sensor: true,
     noise_button: false,
+    speak_to_chat_options: false,
 };
 
-const fn over_ear(model: &'static str, speak_to_chat: bool, equalizer: EqLayout) -> Profile {
-    Profile { model, speak_to_chat, equalizer: Some(equalizer), ..UNKNOWN }
+/// The over-ear 1000X models, with everything the protocol offers.
+const fn over_ear(model: &'static str, equalizer: EqLayout) -> Profile {
+    Profile { model, equalizer: Some(equalizer), noise_button: true, speak_to_chat_options: true, ..UNKNOWN }
 }
 
-const fn earbuds(model: &'static str, wind_reduction: bool) -> Profile {
-    Profile { model, battery: BatteryLayout::Earbuds, wind_reduction, ..UNKNOWN }
+/// Over-ear models without Speak-to-Chat or a wear sensor.
+const fn plain_over_ear(model: &'static str) -> Profile {
+    Profile { model, speak_to_chat: false, wear_sensor: false, ..UNKNOWN }
+}
+
+const fn earbuds(model: &'static str, wind_reduction: bool, speak_to_chat_options: bool) -> Profile {
+    Profile { model, battery: BatteryLayout::Earbuds, wind_reduction, speak_to_chat_options, ..UNKNOWN }
 }
 
 /// Name fragments (upper case) and the profile they identify.
 const PROFILES: [(&[&str], Profile); 8] = [
-    (
-        &["WH-1000XM5"],
-        Profile { tested: true, noise_button: true, ..over_ear("WH-1000XM5", true, EqLayout::FiveBands) },
-    ),
-    (&["WH-1000XM6"], Profile { noise_button: true, ..over_ear("WH-1000XM6", true, EqLayout::TenBands) }),
-    (&["WH-CH720N"], Profile { wear_sensor: false, ..over_ear("WH-CH720N", false, EqLayout::FiveBands) }),
-    (&["ULT WEAR", "WH-ULT900N"], Profile { wear_sensor: false, ..over_ear("ULT WEAR", false, EqLayout::FiveBands) }),
-    (&["WF-1000XM4"], earbuds("WF-1000XM4", true)),
-    (&["WF-1000XM5"], earbuds("WF-1000XM5", true)),
-    (&["WF-1000XM6"], earbuds("WF-1000XM6", false)),
-    (&["LINKBUDS S", "WF-LS900N"], earbuds("LinkBuds S", false)),
+    (&["WH-1000XM5"], Profile { tested: true, ..over_ear("WH-1000XM5", EqLayout::FiveBands) }),
+    (&["WH-1000XM6"], over_ear("WH-1000XM6", EqLayout::TenBands)),
+    (&["WH-CH720N"], plain_over_ear("WH-CH720N")),
+    (&["ULT WEAR", "WH-ULT900N"], plain_over_ear("ULT WEAR")),
+    // Gadgetbridge has no Speak-to-Chat options for the WF-1000XM4.
+    (&["WF-1000XM4"], earbuds("WF-1000XM4", true, false)),
+    (&["WF-1000XM5"], earbuds("WF-1000XM5", true, true)),
+    (&["WF-1000XM6"], earbuds("WF-1000XM6", false, true)),
+    (&["LINKBUDS S", "WF-LS900N"], earbuds("LinkBuds S", false, true)),
 ];
 
 /// The profile for a headset, from its Bluetooth name.
@@ -101,6 +108,7 @@ impl Profile {
             features,
             auto_off: if self.wear_sensor { auto_off_choices() } else { Vec::new() },
             noise_button: if self.noise_button { NoiseButton::ALL.to_vec() } else { Vec::new() },
+            speak_to_chat_options: self.speak_to_chat && self.speak_to_chat_options,
             equalizer: self.equalizer,
         }
     }
@@ -112,6 +120,9 @@ impl Profile {
         requests.extend([Request::Codec, Request::NoiseControl]);
         if self.speak_to_chat {
             requests.push(Request::SpeakToChat);
+        }
+        if self.speak_to_chat && self.speak_to_chat_options {
+            requests.push(Request::SpeakToChatOptions);
         }
         if let Some(layout) = self.equalizer {
             requests.push(Request::Equalizer(layout));
@@ -160,8 +171,9 @@ mod tests {
 
     #[test]
     fn asks_each_model_for_what_it_has() {
-        // What the WH-1000XM5 was tested with, then what other apps change on
-        // it: pausing and turning off when taken off, and its NC/AMB button.
+        // What the WH-1000XM5 was tested with, and what other apps change on
+        // it: Speak-to-Chat's options, pausing and turning off when taken off,
+        // and its NC/AMB button.
         assert_eq!(
             profile_for("WH-1000XM5").initial_requests(),
             [
@@ -171,6 +183,7 @@ mod tests {
                 Request::Codec,
                 Request::NoiseControl,
                 Request::SpeakToChat,
+                Request::SpeakToChatOptions,
                 Request::Equalizer(EqLayout::FiveBands),
                 Request::Dsee,
                 Request::PauseWhenTakenOff,
@@ -179,6 +192,7 @@ mod tests {
             ]
         );
         assert!(!profile_for("WF-1000XM5").initial_requests().contains(&Request::NoiseButton));
+        assert!(!profile_for("WF-1000XM4").initial_requests().contains(&Request::SpeakToChatOptions));
         let earbuds = profile_for("WF-1000XM5").initial_requests();
         assert!(earbuds.contains(&Request::EarbudBattery) && earbuds.contains(&Request::CaseBattery));
         assert!(!earbuds.contains(&Request::Battery));

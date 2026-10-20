@@ -40,6 +40,8 @@ pub struct Device {
     /// Choices for what its noise control button switches between; empty
     /// when it can't be changed.
     pub noise_button: Vec<NoiseButton>,
+    /// Speak-to-Chat's sensitivity and when it ends can be changed.
+    pub speak_to_chat_options: bool,
     pub equalizer: Option<EqLayout>,
 }
 
@@ -64,6 +66,7 @@ impl Device {
             features: Vec::new(),
             auto_off: Vec::new(),
             noise_button: Vec::new(),
+            speak_to_chat_options: false,
             equalizer: None,
         }
     }
@@ -209,6 +212,52 @@ impl NoiseButton {
     }
 }
 
+/// How readily Speak-to-Chat notices you talking.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum VoiceSensitivity {
+    Auto,
+    High,
+    Low,
+}
+
+impl VoiceSensitivity {
+    pub const ALL: [Self; 3] = [Self::Auto, Self::High, Self::Low];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Auto => "Automatic",
+            Self::High => "High",
+            Self::Low => "Low",
+        }
+    }
+}
+
+/// When Speak-to-Chat goes back to the previous mode after you stop talking.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum SpeakToChatEnd {
+    /// After about 15 seconds.
+    Short,
+    /// After about 30 seconds.
+    Standard,
+    /// After about a minute.
+    Long,
+    /// Only when you change the mode.
+    Never,
+}
+
+impl SpeakToChatEnd {
+    pub const ALL: [Self; 4] = [Self::Short, Self::Standard, Self::Long, Self::Never];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Short => "After 15 seconds",
+            Self::Standard => "After 30 seconds",
+            Self::Long => "After 1 minute",
+            Self::Never => "Never",
+        }
+    }
+}
+
 /// Something the headset reported.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Update {
@@ -232,6 +281,8 @@ pub enum Update {
     Feature(Feature, bool),
     AutoOff(AutoOff),
     NoiseButton(NoiseButton),
+    VoiceSensitivity(VoiceSensitivity),
+    SpeakToChatEnd(SpeakToChatEnd),
     Equalizer(Equalizer),
 }
 
@@ -244,6 +295,8 @@ pub enum Setting {
     Feature(Feature, bool),
     AutoOff(AutoOff),
     NoiseButton(NoiseButton),
+    VoiceSensitivity(VoiceSensitivity),
+    SpeakToChatEnd(SpeakToChatEnd),
     EqualizerPreset(EqPreset),
     EqualizerBands(EqBands),
 }
