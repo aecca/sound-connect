@@ -106,6 +106,8 @@ pub enum Feature {
     SpeakToChat,
     Dsee,
     VoicePrompts,
+    /// Pause playback while the headset is off your head or out of your ears.
+    PauseWhenTakenOff,
 }
 
 impl Feature {
@@ -114,6 +116,7 @@ impl Feature {
             Self::SpeakToChat => "Speak-to-Chat",
             Self::Dsee => "DSEE Extreme",
             Self::VoicePrompts => "Voice Prompts",
+            Self::PauseWhenTakenOff => "Pause When Taken Off",
         }
     }
 
@@ -122,6 +125,7 @@ impl Feature {
             Self::SpeakToChat => "Switches to ambient sound when you start talking",
             Self::Dsee => "Restores detail lost in compressed music",
             Self::VoicePrompts => "Spoken announcements, like the battery level when turning on",
+            Self::PauseWhenTakenOff => "Pauses music when you take them off, and plays it when you put them back on",
         }
     }
 }
@@ -131,6 +135,8 @@ impl Feature {
 pub enum AutoOff {
     Never,
     Minutes(u16),
+    /// A while after being taken off, for headsets that can tell.
+    WhenTakenOff,
 }
 
 impl AutoOff {
@@ -142,6 +148,7 @@ impl AutoOff {
                 hours => format!("After {hours} hours"),
             },
             Self::Minutes(minutes) => format!("After {minutes} minutes"),
+            Self::WhenTakenOff => "When taken off".into(),
         }
     }
 }
@@ -193,5 +200,6 @@ mod tests {
         assert_eq!(AutoOff::Minutes(20).name(), "After 20 minutes");
         assert_eq!(AutoOff::Minutes(60).name(), "After 1 hour");
         assert_eq!(AutoOff::Minutes(180).name(), "After 3 hours");
+        assert_eq!(AutoOff::WhenTakenOff.name(), "When taken off");
     }
 }

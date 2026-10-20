@@ -25,6 +25,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     private var callsItem: NSMenuItem?
     private var featureItems: [(Feature, NSMenuItem)] = []
     private var presetItems: [(EqPreset, NSMenuItem)] = []
+    private var autoOffItem: NSMenuItem?
     private var autoOffItems: [(AutoOff, NSMenuItem)] = []
     private var openAtLoginItem: NSMenuItem?
 
@@ -113,6 +114,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         callsItem = nil
         featureItems = []
         presetItems = []
+        autoOffItem = nil
         autoOffItems = []
 
         // Views inside menus need a real frame; SwiftUI sizes the header itself.
@@ -157,9 +159,10 @@ final class StatusMenu: NSObject, NSMenuDelegate {
                 menu.addItem(item)
             }
             if !device.autoOff.isEmpty {
-                let item = NSMenuItem(title: "Turn Off When Unused", action: nil, keyEquivalent: "")
+                let item = NSMenuItem(title: "Turn Off Automatically", action: nil, keyEquivalent: "")
                 item.image = symbol("moon.zzz")
                 item.submenu = autoOffMenu(device.autoOff)
+                autoOffItem = item
                 menu.addItem(item)
             }
         }
@@ -227,6 +230,8 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         for (preset, item) in presetItems {
             item.state = model.equalizer?.preset == preset ? .on : .off
         }
+        // Hidden until the headset has reported it, like the features.
+        autoOffItem?.isHidden = model.autoOff == nil
         for (choice, item) in autoOffItems {
             item.state = model.autoOff == choice ? .on : .off
         }
@@ -334,6 +339,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         case .speakToChat: "bubble.left.and.bubble.right"
         case .dsee: "waveform"
         case .voicePrompts: "speaker.wave.2.bubble"
+        case .pauseWhenTakenOff: "pause.circle"
         }
     }
 

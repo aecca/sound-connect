@@ -5,7 +5,7 @@
 //! checked against a WH-1000XM5. Layouts only other models use are marked as
 //! such and haven't been tried on hardware by this project.
 
-use crate::device::{Battery, ListeningMode};
+use crate::device::{AutoOff, Battery, ListeningMode};
 use crate::equalizer::{EqBands, EqLayout, EqPreset, Equalizer};
 
 /// How a headset lays out its noise-control message. Read from its replies
@@ -52,6 +52,11 @@ pub(super) enum Request {
     /// DSEE Extreme, Sony's upscaling for compressed music.
     Dsee,
     SetDsee(bool),
+    PauseWhenTakenOff,
+    SetPauseWhenTakenOff(bool),
+    AutoOff,
+    /// One of [`auto_off_choices`].
+    SetAutoOff(AutoOff),
 }
 
 /// What the headset sent.
@@ -75,6 +80,8 @@ pub(super) enum Reply {
     SpeakToChat(bool),
     Equalizer(Equalizer),
     Dsee(bool),
+    PauseWhenTakenOff(bool),
+    AutoOff(AutoOff),
 }
 
 /// Noise-control "inquired type" used by v2 headsets. 0x15 gets no reply on
@@ -83,6 +90,13 @@ const NOISE_TYPE: u8 = 0x17;
 /// Speak-to-Chat lives among the "system" settings (0xf6..0xf9), as type 0x0c.
 /// Its value is inverted: 0x00 means on.
 const SPEAK_TO_CHAT: u8 = 0x0c;
+/// Pausing when taken off is the system setting of type 0x01, inverted too.
+const PAUSE_WHEN_TAKEN_OFF: u8 = 0x01;
+/// Automatic power off of headsets that know when they're worn. Others use
+/// type 0x04, which isn't supported here yet.
+const AUTO_OFF_WEARING: u8 = 0x05;
+/// Its choices, as Sony's app offers them, and the two bytes each is sent as.
+const AUTO_OFF_CODES: [(AutoOff, [u8; 2]); 2] = [(AutoOff::WhenTakenOff, [0x10, 0x00]), (AutoOff::Never, [0x11, 0x00])];
 /// Five-band equalizer values are sent offset by 10, so -10..=10 becomes 0..=20.
 const EQ_OFFSET: i8 = 10;
 /// Battery "inquired types".
@@ -120,8 +134,23 @@ impl Request {
             }
             Self::Dsee => vec![0xe6, 0x01],
             Self::SetDsee(on) => vec![0xe8, 0x01, u8::from(*on)],
+            Self::PauseWhenTakenOff => vec![0xf6, PAUSE_WHEN_TAKEN_OFF],
+            Self::SetPauseWhenTakenOff(on) => vec![0xf8, PAUSE_WHEN_TAKEN_OFF, u8::from(!on)],
+            Self::AutoOff => vec![0x26, AUTO_OFF_WEARING],
+            Self::SetAutoOff(choice) => {
+                let (_, code) = AUTO_OFF_CODES
+                    .iter()
+                    .find(|(offered, _)| offered == choice)
+                    .expect("only offered choices are sent");
+                vec![0x28, AUTO_OFF_WEARING, code[0], code[1]]
+            }
         }
     }
+}
+
+/// The automatic power off choices of headsets that know when they're worn.
+pub(super) fn auto_off_choices() -> Vec<AutoOff> {
+    AUTO_OFF_CODES.iter().map(|(choice, _)| *choice).collect()
 }
 
 fn noise_payload(opcode: u8, nc: &NoiseControl) -> Vec<u8> {
@@ -217,6 +246,10 @@ pub(super) fn parse(p: &[u8]) -> Option<Reply> {
             layout: NoiseLayout::WithWind,
         })),
         0xf7 | 0xf9 if p.len() >= 3 && p[1] == SPEAK_TO_CHAT => Some(Reply::SpeakToChat(p[2] == 0x00)),
+        0xf7 | 0xf9 if p.len() == 3 && p[1] == PAUSE_WHEN_TAKEN_OFF => Some(Reply::PauseWhenTakenOff(p[2] == 0x00)),
+        0x27 | 0x29 if p.len() >= 3 && p[1] == AUTO_OFF_WEARING => {
+            AUTO_OFF_CODES.iter().find(|(_, code)| code[0] == p[2]).map(|(choice, _)| Reply::AutoOff(*choice))
+        }
         0x57 | 0x59 if p.len() == 10 && p[1] == layout_code(EqLayout::FiveBands) && p[3] == 6 => {
             Some(Reply::Equalizer(Equalizer {
                 preset: preset_from_code(p[2]),
@@ -326,6 +359,29 @@ mod tests {
         assert_eq!(parse(&[0xf9, 0x0c, 0x01, 0x01]), Some(Reply::SpeakToChat(false)));
         // Other system settings share these opcodes.
         assert_eq!(parse(&[0xf7, 0x01, 0x00, 0x01]), None);
+    }
+
+    // Replies captured from a WF-1000XM5 (firmware 6.1.0), from
+    // SonyHeadphonesClient's test data.
+    #[test]
+    fn pause_when_taken_off_is_inverted_on_the_wire() {
+        assert_eq!(parse(&[0xf7, 0x01, 0x00]), Some(Reply::PauseWhenTakenOff(true)));
+        assert_eq!(parse(&[0xf9, 0x01, 0x01]), Some(Reply::PauseWhenTakenOff(false)));
+        assert_eq!(Request::PauseWhenTakenOff.payload(), [0xf6, 0x01]);
+        assert_eq!(Request::SetPauseWhenTakenOff(true).payload(), [0xf8, 0x01, 0x00]);
+        assert_eq!(Request::SetPauseWhenTakenOff(false).payload(), [0xf8, 0x01, 0x01]);
+    }
+
+    #[test]
+    fn encodes_and_parses_automatic_power_off() {
+        assert_eq!(parse(&[0x27, 0x05, 0x10, 0x00]), Some(Reply::AutoOff(AutoOff::WhenTakenOff)));
+        assert_eq!(parse(&[0x29, 0x05, 0x11, 0x00]), Some(Reply::AutoOff(AutoOff::Never)));
+        // Timers other models use aren't offered, so they aren't shown either.
+        assert_eq!(parse(&[0x27, 0x05, 0x01, 0x01]), None);
+        assert_eq!(Request::AutoOff.payload(), [0x26, 0x05]);
+        assert_eq!(Request::SetAutoOff(AutoOff::WhenTakenOff).payload(), [0x28, 0x05, 0x10, 0x00]);
+        assert_eq!(Request::SetAutoOff(AutoOff::Never).payload(), [0x28, 0x05, 0x11, 0x00]);
+        assert_eq!(auto_off_choices(), [AutoOff::WhenTakenOff, AutoOff::Never]);
     }
 
     #[test]

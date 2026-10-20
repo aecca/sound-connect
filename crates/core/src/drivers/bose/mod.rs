@@ -174,6 +174,8 @@ impl Driver for BoseDriver {
                 let minutes = match auto_off {
                     AutoOff::Never => 0,
                     AutoOff::Minutes(minutes) => u8::try_from(minutes).expect("the offered choices fit in a byte"),
+                    // Not one of the choices this headset offers.
+                    AutoOff::WhenTakenOff => return Vec::new(),
                 };
                 self.request(Packet::set_get(Function::AUTO_OFF, vec![minutes]), now)
             }

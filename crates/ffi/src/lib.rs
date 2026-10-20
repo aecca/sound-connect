@@ -41,6 +41,7 @@ pub enum Feature {
     SpeakToChat,
     Dsee,
     VoicePrompts,
+    PauseWhenTakenOff,
 }
 
 #[uniffi::remote(Enum)]
@@ -77,6 +78,7 @@ pub struct Ambient {
 pub enum AutoOff {
     Never,
     Minutes { minutes: u16 },
+    WhenTakenOff,
 }
 
 /// A headset and the controls it offers. See `sc_core::Device`.
@@ -299,6 +301,7 @@ impl From<sc_core::AutoOff> for AutoOff {
         match auto_off {
             sc_core::AutoOff::Never => Self::Never,
             sc_core::AutoOff::Minutes(minutes) => Self::Minutes { minutes },
+            sc_core::AutoOff::WhenTakenOff => Self::WhenTakenOff,
         }
     }
 }
@@ -308,6 +311,7 @@ impl From<AutoOff> for sc_core::AutoOff {
         match auto_off {
             AutoOff::Never => Self::Never,
             AutoOff::Minutes { minutes } => Self::Minutes(minutes),
+            AutoOff::WhenTakenOff => Self::WhenTakenOff,
         }
     }
 }

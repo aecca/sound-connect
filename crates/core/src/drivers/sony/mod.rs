@@ -73,6 +73,8 @@ impl SonyDriver {
             Reply::SpeakToChat(on) => vec![Update::Feature(Feature::SpeakToChat, on)],
             Reply::Dsee(on) => vec![Update::Feature(Feature::Dsee, on)],
             Reply::Equalizer(equalizer) => vec![Update::Equalizer(equalizer)],
+            Reply::PauseWhenTakenOff(on) => vec![Update::Feature(Feature::PauseWhenTakenOff, on)],
+            Reply::AutoOff(auto_off) => vec![Update::AutoOff(auto_off)],
         }
     }
 }
@@ -104,6 +106,12 @@ impl Driver for SonyDriver {
                 self.session.request(Request::SetSpeakToChat(on), now)
             }
             Setting::Feature(Feature::Dsee, on) if self.profile.dsee => self.session.request(Request::SetDsee(on), now),
+            Setting::Feature(Feature::PauseWhenTakenOff, on) if self.profile.wear_sensor => {
+                self.session.request(Request::SetPauseWhenTakenOff(on), now)
+            }
+            Setting::AutoOff(auto_off) if self.device.auto_off.contains(&auto_off) => {
+                self.session.request(Request::SetAutoOff(auto_off), now)
+            }
             Setting::EqualizerPreset(preset) => match self.profile.equalizer {
                 Some(layout) => self.session.request(Request::SetEqualizerPreset(layout, preset), now),
                 None => Vec::new(),
@@ -127,7 +135,7 @@ impl Driver for SonyDriver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::device::{Battery, ListeningMode};
+    use crate::device::{AutoOff, Battery, ListeningMode};
     use frame::{Message, kind};
 
     /// Feeds the driver what a WH-1000XM5 says: an ACK, then a message.
@@ -178,6 +186,23 @@ mod tests {
         let mut driver = SonyDriver::new("WH-CH720N");
         assert!(driver.set(Setting::Feature(Feature::SpeakToChat, true), now).is_empty());
         assert!(driver.set(Setting::Feature(Feature::VoicePrompts, true), now).is_empty());
+        assert!(driver.set(Setting::Feature(Feature::PauseWhenTakenOff, true), now).is_empty());
+        assert!(driver.set(Setting::AutoOff(AutoOff::Never), now).is_empty());
+    }
+
+    #[test]
+    fn turns_off_and_pauses_when_taken_off() {
+        let now = Instant::now();
+        let mut driver = SonyDriver::new("WH-1000XM5");
+        let output = headset_says(&mut driver, &[0x27, 0x05, 0x10, 0x00], now);
+        assert_eq!(output.updates, [Update::AutoOff(AutoOff::WhenTakenOff)]);
+        let output = headset_says(&mut driver, &[0xf7, 0x01, 0x00], now);
+        assert_eq!(output.updates, [Update::Feature(Feature::PauseWhenTakenOff, true)]);
+
+        let frames = driver.set(Setting::AutoOff(AutoOff::Never), now);
+        assert_eq!(frames, [Message::command(1, vec![0x28, 0x05, 0x11, 0x00]).encode()]);
+        // Only the choices Sony's app offers on this model go out.
+        assert!(driver.set(Setting::AutoOff(AutoOff::Minutes(30)), now).is_empty());
     }
 
     #[test]

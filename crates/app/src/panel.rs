@@ -235,22 +235,23 @@ impl Panel {
         }))
     }
 
-    fn auto_off(&self, device: &Device, p: Palette, cx: &App) -> impl IntoElement {
-        let current = self.headset.read(cx).auto_off;
+    /// Shown once the headset has reported it, like the features.
+    fn auto_off(&self, device: &Device, p: Palette, cx: &App) -> Option<impl IntoElement> {
+        let current = self.headset.read(cx).auto_off.filter(|_| !device.auto_off.is_empty())?;
         let choices = device.auto_off.clone();
         let headset = self.headset.clone();
-        v_flex()
+        let row = v_flex()
             .px_2()
             .py_1()
             .gap_1p5()
-            .child("Turn Off When Unused")
+            .child("Turn Off Automatically")
             .child(
                 ButtonGroup::new("auto-off")
                     .outline()
                     .xsmall()
                     .w_full()
                     .children(choices.iter().map(|&choice| {
-                        Button::new(choice.name()).label(short_name(choice)).flex_1().selected(current == Some(choice))
+                        Button::new(choice.name()).label(short_name(choice)).flex_1().selected(current == choice)
                     }))
                     .on_click(move |clicked, _, cx| {
                         if let Some(&choice) = clicked.first().and_then(|&index| choices.get(index)) {
@@ -258,7 +259,8 @@ impl Panel {
                         }
                     }),
             )
-            .text_color(p.label)
+            .text_color(p.label);
+        Some(row)
     }
 
     fn message(title: &str, body: &str, p: Palette) -> impl IntoElement {
@@ -282,7 +284,7 @@ impl Panel {
             .when_some(device.ambient.as_ref(), |this, ambient| this.child(self.ambient(ambient.focus_on_voice, p, cx)))
             .children(self.calls(p, cx))
             .when(!device.features.is_empty(), |this| this.child(separator(p)).child(self.features(device, p, cx)))
-            .when(!device.auto_off.is_empty(), |this| this.child(separator(p)).child(self.auto_off(device, p, cx)))
+            .when_some(self.auto_off(device, p, cx), |this, auto_off| this.child(separator(p)).child(auto_off))
             .into_any_element()
     }
 }
@@ -377,6 +379,7 @@ fn short_name(auto_off: AutoOff) -> String {
         AutoOff::Never => "Never".into(),
         AutoOff::Minutes(minutes) if minutes % 60 == 0 => format!("{}h", minutes / 60),
         AutoOff::Minutes(minutes) => format!("{minutes}m"),
+        AutoOff::WhenTakenOff => "When taken off".into(),
     }
 }
 
