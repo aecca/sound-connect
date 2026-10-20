@@ -1,5 +1,6 @@
 import CoreAudio
 import Foundation
+import Observation
 import SoundConnectCore
 
 /// "Ambient Sound During Calls": while an app records from a microphone, as
@@ -7,6 +8,7 @@ import SoundConnectCore
 /// yourself, and back to its mode once the call is over. The shared core
 /// decides; this tells it whether anything is recording.
 @MainActor
+@Observable
 final class Calls {
     /// macOS 14.2 and later say which apps are recording, without asking for
     /// access to the microphone.
@@ -24,8 +26,8 @@ final class Calls {
     }
 
     private let model: HeadsetModel
-    private var policy = CallAmbience()
-    private var timer: Timer?
+    @ObservationIgnored private var policy = CallAmbience()
+    @ObservationIgnored private var timer: Timer?
 
     init(model: HeadsetModel) {
         self.model = model

@@ -10,7 +10,7 @@ Sound Connect talks to headphones over a Bluetooth serial channel (RFCOMM) using
 | `crates/core/src/drivers/sony` | Sony: framing, commands, per-model profiles and the ACK-based session. Tested against messages captured from a real WH-1000XM5. |
 | `crates/core/src/drivers/bose` | Bose QuietComfort 35 and 35 II, over BMAP. |
 | `crates/ffi` | Swift bindings for the drivers (UniFFI), used by the Mac app. |
-| `macos/` | The native Mac app (Swift, AppKit menu, IOBluetooth). |
+| `macos/` | The native Mac app (Swift, an AppKit and SwiftUI menu bar panel, IOBluetooth). |
 | `crates/bluetooth` | Bluetooth link for the Rust app: BlueZ on Linux, IOBluetooth on macOS. |
 | `crates/app` | The Linux app (Rust, GPUI): a tray icon, a small panel, the equalizer window and the `sound-connect` command. |
 | `install.sh` | The one-line installer. |

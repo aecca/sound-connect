@@ -8,6 +8,7 @@ import SwiftUI
 /// the menu is closed: with the button on the headphones, the keyboard
 /// shortcut, a link or a call. On until the user turns it off.
 @MainActor
+@Observable
 final class ModePopUp {
     static let title = "Mode Change Pop-up"
     private static let key = "ModeChangePopUp"
@@ -18,13 +19,13 @@ final class ModePopUp {
         didSet { UserDefaults.standard.set(isOn, forKey: Self.key) }
     }
     /// Set by the menu: changes made in it show there instead.
-    var menuIsOpen = false
+    @ObservationIgnored var menuIsOpen = false
 
     private let model: HeadsetModel
     /// The mode last seen, so only an actual change shows, not the first report.
-    private var lastMode: ListeningMode?
-    private var panel: NSPanel?
-    private var hideTimer: Timer?
+    @ObservationIgnored private var lastMode: ListeningMode?
+    @ObservationIgnored private var panel: NSPanel?
+    @ObservationIgnored private var hideTimer: Timer?
 
     init(model: HeadsetModel) {
         self.model = model

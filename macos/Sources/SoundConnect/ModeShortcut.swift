@@ -1,5 +1,6 @@
 import Carbon.HIToolbox
 import Foundation
+import Observation
 
 /// "Switch Modes with ⌃⌥⌘N": a keyboard shortcut that works in every app and
 /// steps through the headset's listening modes. It's a Carbon hot key, the
@@ -7,6 +8,7 @@ import Foundation
 /// since macOS 15 turns down hot keys with only ⌥ and ⇧. Off until the user
 /// turns it on.
 @MainActor
+@Observable
 final class ModeShortcut {
     static let title = "Switch Modes with ⌃⌥⌘N"
     private static let key = "ModeShortcut"
@@ -21,7 +23,7 @@ final class ModeShortcut {
     }
 
     private let model: HeadsetModel
-    private var hotKey: EventHotKeyRef?
+    @ObservationIgnored private var hotKey: EventHotKeyRef?
 
     init(model: HeadsetModel) {
         self.model = model

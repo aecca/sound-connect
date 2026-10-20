@@ -46,14 +46,12 @@ enum Snapshots {
             save(equalizer?.windowNumber, to: folder.appendingPathComponent("equalizer-\(suffix).png"))
             equalizer?.orderOut(nil)
 
-            // Opening the menu blocks until it closes, so the capture is
-            // scheduled first and runs while the menu is open.
+            menu.popUp(at: NSPoint(x: 120, y: 900), appearance: NSAppearance(named: appearance))
             after(1) {
                 save(ownMenuWindow(), to: folder.appendingPathComponent("menu-\(suffix).png"))
                 menu.close()
+                after(0.5) { shoot(Array(appearances.dropFirst()), menu: menu, model: model, folder: folder) }
             }
-            menu.popUp(at: NSPoint(x: 120, y: 900), appearance: NSAppearance(named: appearance))
-            after(0.5) { shoot(Array(appearances.dropFirst()), menu: menu, model: model, folder: folder) }
         }
     }
 
@@ -63,7 +61,7 @@ enum Snapshots {
         RunLoop.main.add(timer, forMode: .common)
     }
 
-    /// This app's open menu, which AppKit draws in a window at the pop-up menu level.
+    /// This app's open menu: its panel, a window at the pop-up menu level.
     private static func ownMenuWindow() -> Int? {
         let windows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? []
         return windows.first {

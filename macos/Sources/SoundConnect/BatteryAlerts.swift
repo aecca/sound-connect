@@ -7,6 +7,7 @@ import UserNotifications
 /// at 20% and again at 10% and 5%. The shared core decides when. macOS asks once
 /// whether Sound Connect may show notifications, the first time it has one.
 @MainActor
+@Observable
 final class BatteryAlerts: NSObject, UNUserNotificationCenterDelegate {
     private static let key = "LowBatteryAlerts"
 
@@ -15,9 +16,9 @@ final class BatteryAlerts: NSObject, UNUserNotificationCenterDelegate {
     }
 
     private let model: HeadsetModel
-    private var low = LowBattery()
+    @ObservationIgnored private var low = LowBattery()
     /// Which headset `low` is about: another one starts afresh.
-    private var watching: String?
+    @ObservationIgnored private var watching: String?
 
     init(model: HeadsetModel) {
         self.model = model
