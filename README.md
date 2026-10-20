@@ -155,7 +155,7 @@ Sound Connect is free and open source, released under the [MIT License](LICENSE)
 
 ## Your privacy
 
-Sound Connect talks directly to your headphones over Bluetooth. It doesn't need an account and doesn't send anything over the internet.
+Sound Connect talks directly to your headphones over Bluetooth. It doesn't need an account and doesn't collect anything. The only time it goes online is once a day, to ask GitHub whether there's a new version.
 
 ## Not affiliated with Sony or Bose
 
