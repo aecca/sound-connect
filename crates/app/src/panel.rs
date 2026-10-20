@@ -400,13 +400,13 @@ impl Panel {
             return Self::message(&format!("Connecting {name}…"), "", p).into_any_element();
         }
         let body = headset.notice.unwrap_or("Make sure they're on and connected to this computer.");
-        let buttons = headset.paired.iter().map(|name| {
-            let (entity, name) = (self.headset.clone(), name.clone());
-            Button::new(SharedString::from(format!("connect {name}")))
-                .label(format!("Connect {name}"))
+        let buttons = headset.paired.iter().map(|paired| {
+            let (entity, paired) = (self.headset.clone(), paired.clone());
+            Button::new(SharedString::from(format!("connect {}", paired.address)))
+                .label(format!("Connect {}", paired.name))
                 .small()
                 .w_full()
-                .on_click(move |_, _, cx| entity.update(cx, |headset, cx| headset.connect(name.clone(), cx)))
+                .on_click(move |_, _, cx| entity.update(cx, |headset, cx| headset.connect(&paired, cx)))
         });
         v_flex()
             .flex_1()

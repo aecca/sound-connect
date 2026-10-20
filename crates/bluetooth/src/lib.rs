@@ -20,9 +20,9 @@ mod unsupported;
 pub enum Event {
     /// No supported headset is connected; still looking.
     Searching,
-    /// Supported headsets paired with this computer but not connected, by
-    /// name, which [`Request::Connect`] can connect.
-    Paired(Vec<String>),
+    /// Supported headsets paired with this computer but not connected, which
+    /// [`Request::Connect`] can connect.
+    Paired(Vec<PairedHeadset>),
     /// Connecting a paired headset didn't work, e.g. because it's off.
     ConnectFailed,
     Connected {
@@ -34,12 +34,20 @@ pub enum Event {
     Unsupported(String),
 }
 
+/// A headset that's paired but not connected.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PairedHeadset {
+    /// Its Bluetooth address, which tells apart headsets with the same name.
+    pub address: String,
+    pub name: String,
+}
+
 /// What the UI asks of the link.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Request {
     /// A change for the connected headset.
     Change(Setting),
-    /// Connect this paired headset, by name, while none is connected.
+    /// Connect the paired headset with this address, while none is connected.
     Connect(String),
 }
 

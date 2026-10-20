@@ -18,7 +18,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 use tokio::time;
 
-use crate::{Event, Request};
+use crate::{Event, PairedHeadset, Request};
 
 /// Wait between attempts to find the headset, growing while it keeps failing.
 const RETRY_CONNECT: [Duration; 4] =
@@ -67,6 +67,8 @@ async fn link(
     let mut searching = false;
     let mut failures = 0;
     let mut offered = Vec::new();
+    // A headset the user connected, whose control channel should open next.
+    let mut expected = false;
     loop {
         if bluez.is_none() {
             bluez = bluer::Session::new()
@@ -82,6 +84,7 @@ async fn link(
             Some(mut channel) => {
                 searching = false;
                 failures = 0;
+                expected = false;
                 let _ = events.send(Event::Connected { name: channel.headset.name.clone() }).await;
                 let keep_going =
                     serve(&mut channel.stream, channel.headset.driver.as_mut(), &mut requests, &events).await;
@@ -96,6 +99,10 @@ async fn link(
                 if !searching {
                     searching = true;
                     let _ = events.send(Event::Searching).await;
+                }
+                // Connected, but its controls can't be reached.
+                if std::mem::take(&mut expected) {
+                    let _ = events.send(Event::ConnectFailed).await;
                 }
             }
         }
@@ -112,18 +119,19 @@ async fn link(
         // Wait before looking again, unless the user picks a headset to connect.
         let delay = RETRY_CONNECT[failures.min(RETRY_CONNECT.len() - 1)];
         match time::timeout(delay, picked(&mut requests)).await {
-            Ok(Some(name)) => {
+            Ok(Some(address)) => {
                 let connected = match &bluez {
-                    Some(bluez) => connect_paired(bluez, &name).await,
+                    Some(bluez) => connect_paired(bluez, &address).await,
                     None => Err("BlueZ isn't running".into()),
                 };
                 match connected {
                     Ok(()) => {
                         failures = 0;
+                        expected = true;
                         time::sleep(SETTLE_AFTER_CONNECTING).await;
                     }
                     Err(error) => {
-                        eprintln!("bluetooth: can't connect {name}: {error}");
+                        eprintln!("bluetooth: can't connect the headset the user picked: {error}");
                         let _ = events.send(Event::ConnectFailed).await;
                     }
                 }
@@ -138,13 +146,13 @@ async fn link(
     }
 }
 
-/// Waits for the user to pick a paired headset to connect. Settings changed
-/// meanwhile are dropped: the UI reads everything again once a headset
-/// connects. `None` once the app has gone away.
+/// Waits for the user to pick a paired headset to connect, and returns its
+/// address. Settings changed meanwhile are dropped: the UI reads everything
+/// again once a headset connects. `None` once the app has gone away.
 async fn picked(requests: &mut UnboundedReceiver<Request>) -> Option<String> {
     while let Some(request) = requests.recv().await {
-        if let Request::Connect(name) = request {
-            return Some(name);
+        if let Request::Connect(address) = request {
+            return Some(address);
         }
     }
     None
@@ -323,23 +331,30 @@ async fn devices(bluez: &bluer::Session) -> Vec<Device> {
     devices
 }
 
-/// The names of supported headsets that are paired but not connected.
-async fn paired(bluez: &bluer::Session, services: &[(&'static str, Uuid)], name_filter: Option<&str>) -> Vec<String> {
-    let mut names = Vec::new();
+/// Supported headsets that are paired but not connected, by name.
+async fn paired(
+    bluez: &bluer::Session,
+    services: &[(&'static str, Uuid)],
+    name_filter: Option<&str>,
+) -> Vec<PairedHeadset> {
+    let mut headsets = Vec::new();
     for device in devices(bluez).await {
-        if let Ok(Some(name)) = disconnected_headset(&device, services, name_filter).await {
-            names.push(name);
+        if let Ok(Some(headset)) = disconnected_headset(&device, services, name_filter).await {
+            headsets.push(headset);
         }
     }
-    names.sort();
-    names
+    headsets.sort_by(|a, b| a.name.cmp(&b.name));
+    headsets
 }
 
+/// The device, if it's a paired headset that isn't connected and offers a
+/// supported service together with the one carrying its protocol, as
+/// [`Headset::check`] requires once it's connected.
 async fn disconnected_headset(
     device: &Device,
     services: &[(&'static str, Uuid)],
     name_filter: Option<&str>,
-) -> bluer::Result<Option<String>> {
+) -> bluer::Result<Option<PairedHeadset>> {
     if !device.is_paired().await? || device.is_connected().await? {
         return Ok(None);
     }
@@ -348,17 +363,22 @@ async fn disconnected_headset(
         return Ok(None);
     }
     let uuids = device.uuids().await?.unwrap_or_default();
-    Ok(services.iter().any(|(_, uuid)| uuids.contains(uuid)).then_some(name))
+    let supported =
+        services.iter().any(|&(service, uuid)| uuids.contains(&uuid) && channel_for(service, &uuids).is_some());
+    Ok(supported.then(|| PairedHeadset { address: device.address().to_string(), name }))
 }
 
-/// Connects a paired headset by name, as the system's Bluetooth settings would.
-async fn connect_paired(bluez: &bluer::Session, name: &str) -> Result<(), Box<dyn Error>> {
-    for device in devices(bluez).await {
-        if device.alias().await.is_ok_and(|alias| alias == name) {
+/// Connects the paired headset with this address, as the system's Bluetooth
+/// settings would.
+async fn connect_paired(bluez: &bluer::Session, address: &str) -> Result<(), Box<dyn Error>> {
+    let address: bluer::Address = address.parse()?;
+    for name in bluez.adapter_names().await? {
+        let device = bluez.adapter(&name)?.device(address)?;
+        if device.is_paired().await.unwrap_or(false) {
             return Ok(time::timeout(CONNECT_TIMEOUT, device.connect()).await??);
         }
     }
-    Err(format!("no paired device is called {name}").into())
+    Err("it isn't paired with this computer".into())
 }
 
 /// Registers a client profile for each service the headsets use. BlueZ
