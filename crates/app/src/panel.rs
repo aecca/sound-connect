@@ -143,6 +143,25 @@ impl Panel {
             .children(update_button(p, cx))
     }
 
+    /// Each earbud and the case, like the AirPods menu.
+    fn earbuds(&self, p: Palette, cx: &App) -> Option<impl IntoElement> {
+        let headset = self.headset.read(cx);
+        let sides = [("L", headset.left_battery), ("R", headset.right_battery), ("Case", headset.case_battery)];
+        let reporting: Vec<_> = sides.into_iter().filter_map(|(side, battery)| Some((side, battery?))).collect();
+        if reporting.is_empty() {
+            return None;
+        }
+        let row =
+            h_flex().px_2().pb_1().gap_4().justify_end().children(reporting.into_iter().map(|(side, battery)| {
+                h_flex()
+                    .gap_1p5()
+                    .items_center()
+                    .child(div().text_size(px(11.)).text_color(p.secondary).child(side))
+                    .child(battery_indicator(battery, p))
+            }));
+        Some(row)
+    }
+
     fn modes(&self, device: &Device, p: Palette, cx: &App) -> impl IntoElement {
         let current = self.headset.read(cx).mode;
         v_flex().gap_0p5().child(section_title("Noise Control", p)).children(device.modes.iter().map(|mode| {
@@ -383,6 +402,7 @@ impl Render for Panel {
             .text_size(px(13.))
             .text_color(p.label)
             .child(self.header(p, cx))
+            .children(self.earbuds(p, cx))
             .child(separator(p))
             .child(v_flex().flex_1().child(body))
             .child(separator(p))

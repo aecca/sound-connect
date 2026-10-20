@@ -14,7 +14,10 @@ pub fn start(headset: Entity<Headset>, cx: &mut App) {
     let mut low = LowBattery::default();
     cx.observe(&headset, move |headset, cx| {
         let headset = headset.read(cx);
-        let (Some(battery), Some(device)) = (headset.battery, &headset.device) else { return };
+        // Earbuds: the emptier one that isn't charging.
+        let earbuds = [headset.left_battery, headset.right_battery].into_iter().flatten().filter(|b| !b.charging);
+        let battery = headset.battery.or_else(|| earbuds.min_by_key(|b| b.level));
+        let (Some(battery), Some(device)) = (battery, &headset.device) else { return };
         if !low.update(battery) || !cx.global::<Settings>().low_battery_alerts {
             return;
         }

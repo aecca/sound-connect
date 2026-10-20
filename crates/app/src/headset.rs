@@ -24,6 +24,11 @@ pub struct Headset {
     /// Which controls the headset has, once its driver knows.
     pub device: Option<Device>,
     pub battery: Option<Battery>,
+    /// Earbuds report each side and the case instead of `battery`; `None`
+    /// for one that isn't reporting, e.g. a bud in its case.
+    pub left_battery: Option<Battery>,
+    pub right_battery: Option<Battery>,
+    pub case_battery: Option<Battery>,
     pub codec: Option<String>,
     pub mode: Option<ListeningMode>,
     pub ambient_level: Option<u8>,
@@ -43,6 +48,9 @@ impl Headset {
             name: None,
             device: None,
             battery: None,
+            left_battery: None,
+            right_battery: None,
+            case_battery: None,
             codec: None,
             mode: None,
             ambient_level: None,
@@ -74,6 +82,8 @@ impl Headset {
             Update::Unsupported(reason) => self.connection = Connection::Unsupported(reason),
             Update::Codec(codec) => self.codec = Some(codec),
             Update::Battery(battery) => self.battery = Some(battery),
+            Update::Earbuds { left, right } => (self.left_battery, self.right_battery) = (left, right),
+            Update::CaseBattery(battery) => self.case_battery = Some(battery),
             Update::Mode(mode) => self.mode = Some(mode),
             Update::AmbientLevel(level) => self.ambient_level = Some(level),
             Update::FocusOnVoice(on) => self.focus_on_voice = Some(on),
@@ -85,8 +95,13 @@ impl Headset {
             Update::VoiceSensitivity(sensitivity) => self.voice_sensitivity = Some(sensitivity),
             Update::SpeakToChatEnd(end) => self.speak_to_chat_end = Some(end),
             // Not shown in this panel yet.
-            Update::Firmware(_) | Update::Earbuds { .. } | Update::CaseBattery(_) | Update::Equalizer(_) => {}
+            Update::Firmware(_) | Update::Equalizer(_) => {}
         }
+    }
+
+    /// The headset's battery, or the emptier earbud's.
+    pub fn lowest_battery(&self) -> Option<Battery> {
+        self.battery.or_else(|| [self.left_battery, self.right_battery].into_iter().flatten().min_by_key(|b| b.level))
     }
 
     /// Whether the headset has this listening mode.

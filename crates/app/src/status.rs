@@ -53,7 +53,7 @@ impl Summary {
             model: format!("{} {}", device.brand.name(), device.model),
             mode: mode.map(|mode| mode.mode.id()),
             mode_name: mode.map(|mode| mode.name),
-            battery: headset.battery.map(|battery| (battery.level, battery.charging)),
+            battery: headset.lowest_battery().map(|battery| (battery.level, battery.charging)),
         })
     }
 }
@@ -104,6 +104,20 @@ mod tests {
                 "charging": false,
             })
         );
+    }
+
+    #[test]
+    fn goes_by_the_emptier_earbud() {
+        let mut device = Device::unidentified(Brand::Sony, "WF-1000XM5");
+        device.modes = vec![Mode { mode: ListeningMode::NoiseCancelling, name: "Noise Cancelling" }];
+        let mut headset = Headset::new(mpsc::channel().0);
+        headset.apply(Event::Connected { name: "WF-1000XM5".into() });
+        headset.apply(Event::Update(Update::Device(device)));
+        headset.apply(Event::Update(Update::Mode(ListeningMode::NoiseCancelling)));
+        let (left, right) = (Battery { level: 70, charging: false }, Battery { level: 60, charging: false });
+        headset.apply(Event::Update(Update::Earbuds { left: Some(left), right: Some(right) }));
+        headset.apply(Event::Update(Update::CaseBattery(Battery { level: 20, charging: false })));
+        assert_eq!(text(&headset), "Sony WF-1000XM5: Noise Cancelling, battery 60%");
     }
 
     #[test]
