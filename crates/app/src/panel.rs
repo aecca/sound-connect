@@ -218,6 +218,18 @@ impl Panel {
         ))
     }
 
+    fn low_battery_alerts(p: Palette, cx: &App) -> impl IntoElement {
+        toggle_row(
+            "low-battery-alerts",
+            "Low Battery Alerts",
+            Some("A notification at 20% and at 10%"),
+            cx.global::<Settings>().low_battery_alerts,
+            false,
+            p,
+            |on, cx| settings::change(cx, |settings| settings.low_battery_alerts = on),
+        )
+    }
+
     fn features(&self, device: &Device, p: Palette, cx: &App) -> impl IntoElement {
         let states = &self.headset.read(cx).features;
         v_flex().children(device.features.iter().filter_map(|&feature| {
@@ -285,6 +297,8 @@ impl Panel {
             .children(self.calls(p, cx))
             .when(!device.features.is_empty(), |this| this.child(separator(p)).child(self.features(device, p, cx)))
             .when_some(self.auto_off(device, p, cx), |this, auto_off| this.child(separator(p)).child(auto_off))
+            .child(separator(p))
+            .child(Self::low_battery_alerts(p, cx))
             .into_any_element()
     }
 }

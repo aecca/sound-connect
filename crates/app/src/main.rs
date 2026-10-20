@@ -1,6 +1,7 @@
 //! Sound Connect: control Sony and Bose headphones from the menu bar.
 
 mod assets;
+mod battery_alerts;
 mod calls;
 mod control;
 mod headset;
@@ -57,6 +58,7 @@ fn main() -> ExitCode {
         cx.set_global(settings::Settings::load());
         tray::install(headset.clone(), cx);
         calls::start(headset.clone(), cx);
+        battery_alerts::start(headset.clone(), cx);
         control::serve(headset.clone(), cx);
         update::start(cx);
 

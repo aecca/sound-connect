@@ -6742,6 +6742,7 @@ name = "sound-connect"
 version = "0.2.0"
 dependencies = [
  "async-channel",
+ "dbus",
  "gpui-kit",
  "ksni",
  "objc2 0.6.5",

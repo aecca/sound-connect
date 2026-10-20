@@ -11,6 +11,7 @@ pub mod device;
 pub mod driver;
 pub mod drivers;
 pub mod equalizer;
+pub mod low_battery;
 mod queue;
 pub mod registry;
 
@@ -20,4 +21,5 @@ pub use device::{
 };
 pub use driver::{Driver, Frame, Output};
 pub use equalizer::{EqBands, EqLayout, EqPreset, Equalizer};
+pub use low_battery::LowBattery;
 pub use registry::{SERVICES, channel_service, driver_for};

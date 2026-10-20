@@ -13,6 +13,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     private let updater: Updater
     private let calls: Calls
     private let shortcut: ModeShortcut
+    private let batteryAlerts: BatteryAlerts
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     private let menu = NSMenu()
 
@@ -29,6 +30,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     private var autoOffItem: NSMenuItem?
     private var autoOffItems: [(AutoOff, NSMenuItem)] = []
     private var shortcutItem: NSMenuItem?
+    private var batteryAlertsItem: NSMenuItem?
     private var openAtLoginItem: NSMenuItem?
 
     private enum Layout: Equatable {
@@ -36,11 +38,12 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         case message(String, connect: [String])
     }
 
-    init(model: HeadsetModel, updater: Updater, calls: Calls, shortcut: ModeShortcut) {
+    init(model: HeadsetModel, updater: Updater, calls: Calls, shortcut: ModeShortcut, batteryAlerts: BatteryAlerts) {
         self.model = model
         self.updater = updater
         self.calls = calls
         self.shortcut = shortcut
+        self.batteryAlerts = batteryAlerts
         super.init()
         menu.delegate = self
         menu.autoenablesItems = false
@@ -174,6 +177,9 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         shortcutItem = actionItem(ModeShortcut.title, #selector(toggleShortcut))
         shortcutItem?.toolTip = "Press Control-Option-Command-N in any app to switch to the next mode."
         menu.addItem(shortcutItem!)
+        batteryAlertsItem = actionItem("Low Battery Alerts", #selector(toggleBatteryAlerts))
+        batteryAlertsItem?.toolTip = "A notification when the battery is down to 20%, and again at 10%."
+        menu.addItem(batteryAlertsItem!)
         openAtLoginItem = actionItem("Open at Login", #selector(toggleOpenAtLogin))
         menu.addItem(openAtLoginItem!)
         menu.addItem(actionItem("Quit Sound Connect", #selector(quit), key: "q"))
@@ -220,6 +226,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     private func update() {
         openAtLoginItem?.state = SMAppService.mainApp.status == .enabled ? .on : .off
         shortcutItem?.state = shortcut.isOn ? .on : .off
+        batteryAlertsItem?.state = batteryAlerts.isOn ? .on : .off
         for (mode, item) in modeItems {
             item.state = model.mode == mode ? .on : .off
         }
@@ -322,6 +329,11 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
     @objc private func toggleShortcut() {
         shortcut.isOn.toggle()
+        update()
+    }
+
+    @objc private func toggleBatteryAlerts() {
+        batteryAlerts.isOn.toggle()
         update()
     }
 

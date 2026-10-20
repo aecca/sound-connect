@@ -269,6 +269,23 @@ pub fn feature_description(feature: Feature) -> String {
     feature.description().to_owned()
 }
 
+/// When to say the battery is low. See `sc_core::LowBattery`.
+#[derive(Default, uniffi::Object)]
+pub struct LowBattery(Mutex<sc_core::LowBattery>);
+
+#[uniffi::export]
+impl LowBattery {
+    #[uniffi::constructor]
+    pub fn new() -> Arc<Self> {
+        Arc::default()
+    }
+
+    /// Call with each battery reading. Returns true when it's time to warn.
+    pub fn update(&self, battery: Battery) -> bool {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner).update(battery)
+    }
+}
+
 /// The listening mode with this ID ("ambient", "noise-cancelling", ...), as
 /// commands and links name it.
 #[uniffi::export]

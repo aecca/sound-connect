@@ -8,11 +8,19 @@ use std::{fs, io};
 use gpui_kit::{App, BorrowAppContext, Global};
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, rename_all = "kebab-case")]
 pub struct Settings {
     /// Switch to ambient sound while an app uses the microphone.
     pub ambient_during_calls: bool,
+    /// Show a notification when the battery runs low.
+    pub low_battery_alerts: bool,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self { ambient_during_calls: false, low_battery_alerts: true }
+    }
 }
 
 impl Global for Settings {}
@@ -68,10 +76,12 @@ mod tests {
 
     #[test]
     fn reads_what_it_writes_and_tolerates_missing_or_unknown_keys() {
-        let settings = Settings { ambient_during_calls: true };
+        let settings = Settings { ambient_during_calls: true, low_battery_alerts: false };
         let text = serde_json::to_string(&settings).unwrap();
-        assert_eq!(text, r#"{"ambient-during-calls":true}"#);
+        assert_eq!(text, r#"{"ambient-during-calls":true,"low-battery-alerts":false}"#);
         assert_eq!(serde_json::from_str::<Settings>(&text).unwrap(), settings);
         assert_eq!(serde_json::from_str::<Settings>(r#"{"from-a-newer-version":1}"#).unwrap(), Settings::default());
+        let older = serde_json::from_str::<Settings>(r#"{"ambient-during-calls":true}"#).unwrap();
+        assert!(older.low_battery_alerts);
     }
 }
