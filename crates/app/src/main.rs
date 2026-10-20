@@ -1,5 +1,4 @@
-//! Sound Connect: a light, fast app to control Sony and Bose headphones from
-//! the menu bar.
+//! Sound Connect: control Sony and Bose headphones from the menu bar.
 
 mod assets;
 mod battery_alerts;

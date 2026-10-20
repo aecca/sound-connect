@@ -1,5 +1,4 @@
-// Sound Connect: a light, fast app to control Sony and Bose headphones from the
-// macOS menu bar.
+// Sound Connect: control Sony and Bose headphones from the macOS menu bar.
 
 import AppKit
 import ServiceManagement

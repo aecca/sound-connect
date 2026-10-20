@@ -1,6 +1,6 @@
 [package]
 name = "sound-connect"
-description = "A light, fast app to control Sony and Bose headphones from the menu bar"
+description = "Your Sony and Bose headphones, one click away in the menu bar"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
