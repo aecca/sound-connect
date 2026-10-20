@@ -176,6 +176,15 @@ final class HeadsetLink: NSObject, IOBluetoothRFCOMMChannelDelegate {
         scheduleAttempt(after: 1)
     }
 
+    /// Closes the control channel as the app quits, also while it's still
+    /// opening, so the headset isn't left holding a half-open one.
+    func close() {
+        guard let channel else { return }
+        // Forgotten first, so its closing doesn't start a new search.
+        self.channel = nil
+        channel.close()
+    }
+
     private func send(_ setting: Setting) {
         guard channelOpen, let headset else { return }
         write(headset.set(setting: setting))
