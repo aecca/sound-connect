@@ -4,7 +4,7 @@
 //! from the headset's [`Device`], so it works for any brand.
 
 use gpui_kit::component::button::{Button, ButtonGroup};
-use gpui_kit::component::radio::RadioGroup;
+use gpui_kit::component::radio::{Radio, RadioGroup};
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{Disableable, Selectable, Sizable, Theme, h_flex, v_flex};
@@ -231,20 +231,19 @@ impl Panel {
         )
     }
 
+    /// The on/off features, with Speak-to-Chat's options right under it.
     fn features(&self, device: &Device, p: Palette, cx: &App) -> impl IntoElement {
         let states = &self.headset.read(cx).features;
         v_flex().children(device.features.iter().filter_map(|&feature| {
             let on = *states.get(&feature)?;
             let headset = self.headset.clone();
-            Some(toggle_row(
-                feature.name(),
-                feature.name(),
-                Some(feature.description()),
-                on,
-                false,
-                p,
-                move |on, cx| headset.update(cx, |headset, cx| headset.change(Setting::Feature(feature, on), cx)),
-            ))
+            let row =
+                toggle_row(feature.name(), feature.name(), Some(feature.description()), on, false, p, move |on, cx| {
+                    headset.update(cx, |headset, cx| headset.change(Setting::Feature(feature, on), cx))
+                });
+            let options =
+                (feature == Feature::SpeakToChat).then(|| self.speak_to_chat_options(device, p, cx)).flatten();
+            Some(v_flex().child(row).children(options))
         }))
     }
 
@@ -315,16 +314,19 @@ impl Panel {
         let choices = device.noise_button.clone();
         let selected = choices.iter().position(|&choice| choice == current);
         let headset = self.headset.clone();
-        let row = v_flex().px_2().py_1().gap_1p5().child("Noise Control Button").child(
-            RadioGroup::vertical("noise-button")
-                .children(choices.iter().map(|choice| choice.name()))
-                .selected_index(selected)
-                .on_change(move |&index, _, cx| {
-                    if let Some(&choice) = choices.get(index) {
-                        headset.update(cx, |headset, cx| headset.change(Setting::NoiseButton(choice), cx));
-                    }
-                }),
-        );
+        let row =
+            v_flex().px_2().py_1().gap_1p5().child("Noise Control Button").child(
+                RadioGroup::vertical("noise-button")
+                    .children(choices.iter().enumerate().map(|(index, choice)| {
+                        Radio::new(index).label(choice.name()).small().w_full().text_size(px(12.))
+                    }))
+                    .selected_index(selected)
+                    .on_change(move |&index, _, cx| {
+                        if let Some(&choice) = choices.get(index) {
+                            headset.update(cx, |headset, cx| headset.change(Setting::NoiseButton(choice), cx));
+                        }
+                    }),
+            );
         Some(row.text_color(p.label))
     }
 
@@ -349,7 +351,6 @@ impl Panel {
             .when_some(device.ambient.as_ref(), |this, ambient| this.child(self.ambient(ambient.focus_on_voice, p, cx)))
             .children(self.calls(p, cx))
             .when(!device.features.is_empty(), |this| this.child(separator(p)).child(self.features(device, p, cx)))
-            .children(self.speak_to_chat_options(device, p, cx))
             .when_some(self.auto_off(device, p, cx), |this, auto_off| this.child(separator(p)).child(auto_off))
             .when_some(self.noise_button(device, p, cx), |this, button| this.child(separator(p)).child(button))
             .child(separator(p))
@@ -562,12 +563,16 @@ fn toggle_row(
         .gap_3()
         .justify_between()
         .child(
+            // Takes what's left and wraps, so a long caption can't push the switch out.
             v_flex()
+                .flex_1()
+                .min_w_0()
                 .child(label)
                 .children(caption.map(|caption| div().text_size(px(11.)).text_color(p.secondary).child(caption))),
         )
         .child(
             Switch::new(id)
+                .flex_none()
                 .checked(on)
                 .small()
                 .color(p.accent)
