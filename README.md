@@ -84,7 +84,7 @@ On Linux, add a keyboard shortcut in your system settings that runs this command
 sound-connect mode next
 ```
 
-To go straight to one mode, use `sound-connect mode ambient`, `sound-connect mode noise-cancelling` or `sound-connect mode off` instead. On GNOME, shortcuts are in Settings › Keyboard › Keyboard Shortcuts › Custom Shortcuts. On Omarchy and other Hyprland setups, add it to your Hyprland key bindings.
+To go straight to one mode, use `sound-connect mode ambient`, `sound-connect mode noise-cancelling` or `sound-connect mode off` instead, or `noise-cancelling-low` and `wind-reduction` on headphones that have them. If your computer says it can't find `sound-connect`, log out and back in once after installing. On GNOME, shortcuts are in Settings › Keyboard › Keyboard Shortcuts › Custom Shortcuts. On Omarchy and other Hyprland setups, add it to your Hyprland key bindings.
 
 ## Shortcuts, scripts and status bars
 
@@ -92,6 +92,7 @@ On a Mac, these links switch modes from the Shortcuts app, Raycast, Alfred or Te
 
 - `soundconnect://mode/next`
 - `soundconnect://mode/ambient`, `soundconnect://mode/noise-cancelling` or `soundconnect://mode/off`
+- `soundconnect://mode/noise-cancelling-low` and `soundconnect://mode/wind-reduction`, on headphones that have them
 
 On Linux, `sound-connect status` shows the mode and battery level, and `sound-connect status --json` gives the same for scripts. Add `--follow` to keep it coming whenever something changes. For example, a [Waybar](https://github.com/Alexays/Waybar) module that shows the battery and switches modes when clicked:
 
@@ -139,7 +140,7 @@ Sound Connect shows only the settings your model has. Older Sony models, such as
 - **It keeps saying "Looking for your headphones".** Make sure they're on and connected to this computer in its Bluetooth settings. If they are, turn them off and on again.
 - **On a Mac, it never finds them.** Check that Sound Connect is allowed in System Settings › Privacy & Security › Bluetooth.
 - **On Linux, Bluetooth is off.** Turn it on with `sudo systemctl enable --now bluetooth`.
-- **I don't see Ambient Sound During Calls.** It needs macOS 14.2 or later on a Mac, and PipeWire on Linux, which Omarchy, Ubuntu since 22.10 and most other current systems use.
+- **I don't see Ambient Sound During Calls.** It needs headphones with Ambient Sound, which the Bose QuietComfort 35 doesn't have. It also needs macOS 14.2 or later on a Mac, and on Linux, PipeWire playing the sound, as on Omarchy, Ubuntu since 22.10 and most other current systems.
 
 Still stuck? [Open an issue](https://github.com/aecca/sound-connect/issues) and include your headphones model and computer.
 
@@ -155,7 +156,7 @@ Sound Connect is free and open source, released under the [MIT License](LICENSE)
 
 ## Your privacy
 
-Sound Connect talks directly to your headphones over Bluetooth. It doesn't need an account and doesn't collect anything. The only time it goes online is once a day, to ask GitHub whether there's a new version.
+Sound Connect talks directly to your headphones over Bluetooth. It doesn't need an account and doesn't collect anything. It only goes online to ask GitHub whether there's a new version, when it starts and once a day after that, and to download the new version when you click **Update**.
 
 ## Not affiliated with Sony or Bose
 

@@ -338,7 +338,7 @@ impl Panel {
                 "speak-to-chat-end",
                 &SpeakToChatEnd::ALL,
                 end,
-                |end| short_end_name(end).into(),
+                |end| end.name().into(),
                 !on,
                 set_end,
             ))
@@ -555,15 +555,6 @@ fn choice_buttons<T: Copy + PartialEq + 'static>(
                 on_choose(choice, cx);
             }
         })
-}
-
-fn short_end_name(end: SpeakToChatEnd) -> &'static str {
-    match end {
-        SpeakToChatEnd::Short => "15 s",
-        SpeakToChatEnd::Standard => "30 s",
-        SpeakToChatEnd::Long => "1 min",
-        SpeakToChatEnd::Never => "Never",
-    }
 }
 
 /// Auto-off choices short enough to sit side by side.

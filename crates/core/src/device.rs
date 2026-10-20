@@ -239,14 +239,13 @@ impl VoiceSensitivity {
     }
 }
 
-/// When Speak-to-Chat goes back to the previous mode after you stop talking.
+/// When Speak-to-Chat goes back to the previous mode after you stop talking,
+/// under the names Sony's app gives the choices. Sources disagree on how many
+/// seconds each one is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SpeakToChatEnd {
-    /// After about 15 seconds.
     Short,
-    /// After about 30 seconds.
     Standard,
-    /// After about a minute.
     Long,
     /// Only when you change the mode.
     Never,
@@ -257,9 +256,9 @@ impl SpeakToChatEnd {
 
     pub fn name(self) -> &'static str {
         match self {
-            Self::Short => "After 15 seconds",
-            Self::Standard => "After 30 seconds",
-            Self::Long => "After 1 minute",
+            Self::Short => "Short",
+            Self::Standard => "Standard",
+            Self::Long => "Long",
             Self::Never => "Never",
         }
     }

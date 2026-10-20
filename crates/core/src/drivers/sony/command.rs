@@ -1,9 +1,11 @@
 //! Sony's requests and the replies parsed from what the headset sends.
 //!
 //! Byte layouts follow the v2 protocol (WH-1000XM5 and newer) as documented
-//! by Gadgetbridge and Sony Device Center (`libs/sony-protocol`), and are
-//! checked against a WH-1000XM5. Layouts only other models use are marked as
-//! such and haven't been tried on hardware by this project.
+//! by Gadgetbridge, Sony Device Center (`libs/sony-protocol`) and
+//! SonyHeadphonesClient (`libmdr`). The basics (noise control, battery,
+//! codec, equalizer, DSEE, Speak-to-Chat) are checked against a WH-1000XM5;
+//! the rest come from those projects and messages they captured from other
+//! models, as the tests say, and haven't been tried on hardware here yet.
 
 use super::frame::kind;
 use crate::device::{AutoOff, Battery, ConnectedDevice, ListeningMode, NoiseButton, SpeakToChatEnd, VoiceSensitivity};

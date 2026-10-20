@@ -259,6 +259,10 @@ install_linux() {
 
   "$BIN" --version >/dev/null || fail "The installed app doesn't start; see the error above."
   say "Installed $BIN"
+  case ":$PATH:" in
+    *":$(dirname "$BIN"):"*) ;;
+    *) warn "To use the sound-connect command in a terminal or a keyboard shortcut, log out and back in once." ;;
+  esac
 
   if command -v systemctl >/dev/null && ! systemctl is-active --quiet bluetooth 2>/dev/null; then
     warn "Bluetooth isn't running. Turn it on with: sudo systemctl enable --now bluetooth"

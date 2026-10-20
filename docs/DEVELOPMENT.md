@@ -12,7 +12,7 @@ Sound Connect talks to headphones over a Bluetooth serial channel (RFCOMM) using
 | `crates/ffi` | Swift bindings for the drivers (UniFFI), used by the Mac app. |
 | `macos/` | The native Mac app (Swift, AppKit menu, IOBluetooth). |
 | `crates/bluetooth` | Bluetooth link for the Rust app: BlueZ on Linux, IOBluetooth on macOS. |
-| `crates/app` | The Linux app (Rust, GPUI): a tray icon and a small panel. |
+| `crates/app` | The Linux app (Rust, GPUI): a tray icon, a small panel, the equalizer window and the `sound-connect` command. |
 | `install.sh` | The one-line installer. |
 | `scripts/` | Build, package and test helpers. |
 | `assets/icon.svg` | The app icon. |
@@ -77,4 +77,4 @@ Installed apps find the new version on their own. Once a day they ask where GitH
 
 ## Where the protocols come from
 
-Sony's byte layouts come from [Gadgetbridge](https://codeberg.org/Freeyourgadget/Gadgetbridge) and [Sony Device Center](https://github.com/marconvcm/sony-device-center); Bose's from [bosectl](https://github.com/alabalag1/bosectl) and [based-connect](https://github.com/Denton-L/based-connect). They're checked against real headphones where possible, and comments in `crates/core` say which layouts haven't been tried on hardware yet.
+Sony's byte layouts come from [Gadgetbridge](https://codeberg.org/Freeyourgadget/Gadgetbridge), [Sony Device Center](https://github.com/marconvcm/sony-device-center) and [SonyHeadphonesClient](https://github.com/mos9527/SonyHeadphonesClient), whose captured messages several tests use; Bose's from [bosectl](https://github.com/alabalag1/bosectl) and [based-connect](https://github.com/Denton-L/based-connect). They're checked against real headphones where possible, and comments in `crates/core` say which layouts haven't been tried on hardware yet.
