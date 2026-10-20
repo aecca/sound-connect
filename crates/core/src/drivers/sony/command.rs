@@ -86,6 +86,7 @@ pub(super) enum Request {
     /// Play the audio of the connected device with this address, as the
     /// headset writes it: "AA:BB:CC:DD:EE:FF".
     PlayFrom([u8; 17]),
+    PowerOff,
 }
 
 /// What the headset sent.
@@ -142,6 +143,9 @@ const AUTO_OFF_TIMERS: [(u8, u16); 5] = [(0x00, 5), (0x01, 30), (0x02, 60), (0x0
 const NOISE_BUTTON: u8 = 0x30;
 /// Five-band equalizer values are sent offset by 10, so -10..=10 becomes 0..=20.
 const EQ_OFFSET: i8 = 10;
+/// Turning the headset off is opcode 0x24 with this type and the value 0x01,
+/// as acouplet (MIT) sends it.
+const POWER_OFF: u8 = 0x03;
 /// Battery "inquired types".
 const BATTERY_SINGLE: u8 = 0x00;
 const BATTERY_EARBUDS: u8 = 0x09;
@@ -211,6 +215,7 @@ impl Request {
             Self::Table2Functions => vec![0x06, 0x00],
             Self::ConnectedDevices(list) => vec![0x36, device_list_code(*list)],
             Self::PlayFrom(address) => [&[0x3c, PLAYBACK_DEVICE][..], address].concat(),
+            Self::PowerOff => vec![0x24, POWER_OFF, 0x01],
         }
     }
 }
@@ -701,6 +706,12 @@ mod tests {
         assert_eq!(Request::ConnectedDevices(DeviceList::WithClass).payload(), [0x36, 0x02]);
         assert_eq!(Request::Battery.kind(), kind::COMMAND);
         assert_eq!(parse_table_2(&[0x3d, 0x01, 0x02]), Some(Reply::PlayedFrom));
+    }
+
+    #[test]
+    fn turns_the_headset_off() {
+        assert_eq!(Request::PowerOff.kind(), kind::COMMAND);
+        assert_eq!(Request::PowerOff.payload(), [0x24, 0x03, 0x01]);
     }
 
     #[test]

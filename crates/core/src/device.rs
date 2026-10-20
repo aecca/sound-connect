@@ -43,6 +43,8 @@ pub struct Device {
     /// Speak-to-Chat's sensitivity and when it ends can be changed.
     pub speak_to_chat_options: bool,
     pub equalizer: Option<EqLayout>,
+    /// It can be turned off from the app, with [`Setting::PowerOff`].
+    pub power_off: bool,
 }
 
 impl Device {
@@ -68,6 +70,7 @@ impl Device {
             noise_button: Vec::new(),
             speak_to_chat_options: false,
             equalizer: None,
+            power_off: false,
         }
     }
 }
@@ -321,6 +324,8 @@ pub enum Setting {
     /// Play the audio of this connected device, by its
     /// [`id`](ConnectedDevice::id).
     PlayFrom(String),
+    /// Turn the headset off, on every device it's connected to.
+    PowerOff,
 }
 
 #[cfg(test)]

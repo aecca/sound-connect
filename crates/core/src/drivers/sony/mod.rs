@@ -180,6 +180,7 @@ impl Driver for SonyDriver {
             Setting::EqualizerBands(bands) if self.profile.equalizer.is_some() => {
                 self.session.request(Request::SetEqualizerBands(bands), now)
             }
+            Setting::PowerOff if self.device.power_off => self.session.request(Request::PowerOff, now),
             _ => Vec::new(),
         }
     }
@@ -239,6 +240,13 @@ mod tests {
         headset_says(&mut driver, &[0x67, 0x17, 0x01, 0x01, 0x01, 0x01, 0x0e], now);
         let frames = driver.set(Setting::Mode(ListeningMode::NoiseCancelling), now);
         assert_eq!(frames, [Message::command(1, vec![0x68, 0x17, 0x01, 1, 0, 1, 14]).encode()]);
+    }
+
+    #[test]
+    fn turns_the_headset_off() {
+        let now = Instant::now();
+        let mut driver = SonyDriver::new("WH-1000XM5");
+        assert_eq!(driver.set(Setting::PowerOff, now), [Message::command(0, vec![0x24, 0x03, 0x01]).encode()]);
     }
 
     #[test]

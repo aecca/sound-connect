@@ -159,6 +159,8 @@ final class HeadsetModel {
             for index in connectedDevices.indices {
                 connectedDevices[index].playing = connectedDevices[index].id == id
             }
+        case .powerOff:
+            break
         }
         send(setting)
     }

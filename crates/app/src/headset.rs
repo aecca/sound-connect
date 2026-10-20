@@ -173,6 +173,7 @@ impl Headset {
                 }
                 changed
             }
+            Setting::PowerOff => true,
         };
         if changed {
             let _ = self.requests.send(Request::Change(setting));

@@ -112,6 +112,7 @@ impl Profile {
             noise_button: if self.noise_button { NoiseButton::ALL.to_vec() } else { Vec::new() },
             speak_to_chat_options: self.speak_to_chat && self.speak_to_chat_options,
             equalizer: self.equalizer,
+            power_off: true,
         }
     }
 

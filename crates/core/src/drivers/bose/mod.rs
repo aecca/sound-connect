@@ -105,6 +105,7 @@ impl BoseDriver {
             noise_button: Vec::new(),
             speak_to_chat_options: false,
             equalizer: None,
+            power_off: false,
         };
         if self.device.features.contains(&Feature::ActionButtonNoiseCancelling) {
             // Goes out after the other start-up reads.

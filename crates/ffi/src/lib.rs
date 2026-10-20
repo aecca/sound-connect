@@ -129,6 +129,7 @@ pub struct Device {
     pub noise_button: Vec<NoiseButton>,
     pub speak_to_chat_options: bool,
     pub equalizer: Option<EqLayout>,
+    pub power_off: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, uniffi::Enum)]
@@ -198,6 +199,7 @@ pub enum Setting {
     EqualizerPreset { preset: EqPreset },
     EqualizerBands { bands: EqBands },
     PlayFrom { id: String },
+    PowerOff,
 }
 
 /// What to do after the headset said something: frames to write, in order,
@@ -387,6 +389,7 @@ impl From<sc_core::Device> for Device {
             noise_button: device.noise_button,
             speak_to_chat_options: device.speak_to_chat_options,
             equalizer: device.equalizer,
+            power_off: device.power_off,
         }
     }
 }
@@ -525,6 +528,7 @@ impl From<Setting> for sc_core::Setting {
             Setting::EqualizerPreset { preset } => Self::EqualizerPreset(preset.into()),
             Setting::EqualizerBands { bands } => Self::EqualizerBands(bands.into()),
             Setting::PlayFrom { id } => Self::PlayFrom(id),
+            Setting::PowerOff => Self::PowerOff,
         }
     }
 }
