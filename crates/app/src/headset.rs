@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::sync::mpsc;
 
 use gpui_kit::*;
-use sc_bluetooth::Event;
+use sc_bluetooth::{Event, Request};
 use sc_core::{
     AutoOff, Battery, Device, Feature, ListeningMode, NoiseButton, Setting, SpeakToChatEnd, Update, VoiceSensitivity,
 };
@@ -38,11 +38,17 @@ pub struct Headset {
     pub noise_button: Option<NoiseButton>,
     pub voice_sensitivity: Option<VoiceSensitivity>,
     pub speak_to_chat_end: Option<SpeakToChatEnd>,
-    requests: mpsc::Sender<Setting>,
+    /// Supported headsets paired with this computer but not connected.
+    pub paired: Vec<String>,
+    /// The paired headset the user asked to connect, while that's under way.
+    pub connecting: Option<String>,
+    /// A problem to show while not connected, e.g. a failed connection.
+    pub notice: Option<&'static str>,
+    requests: mpsc::Sender<Request>,
 }
 
 impl Headset {
-    pub fn new(requests: mpsc::Sender<Setting>) -> Self {
+    pub fn new(requests: mpsc::Sender<Request>) -> Self {
         Self {
             connection: Connection::Searching,
             name: None,
@@ -60,16 +66,31 @@ impl Headset {
             noise_button: None,
             voice_sensitivity: None,
             speak_to_chat_end: None,
+            paired: Vec::new(),
+            connecting: None,
+            notice: None,
             requests,
         }
     }
 
     pub fn apply(&mut self, event: Event) {
         match event {
-            Event::Searching | Event::Disconnected => *self = Self::new(self.requests.clone()),
+            // Forget the headset, but not what's paired or being connected.
+            Event::Searching | Event::Disconnected => {
+                let (paired, connecting, notice) =
+                    (std::mem::take(&mut self.paired), self.connecting.take(), self.notice);
+                *self = Self { paired, connecting, notice, ..Self::new(self.requests.clone()) };
+            }
+            Event::Paired(names) => self.paired = names,
+            Event::ConnectFailed => {
+                self.connecting = None;
+                self.notice = Some("Couldn't connect. Are they on?");
+            }
             Event::Connected { name } => {
                 self.connection = Connection::Connected;
                 self.name = Some(name);
+                self.connecting = None;
+                self.notice = None;
             }
             Event::Unsupported(reason) => self.connection = Connection::Unsupported(reason),
             Event::Update(update) => self.update(update),
@@ -125,8 +146,16 @@ impl Headset {
             Setting::EqualizerPreset(_) | Setting::EqualizerBands(_) => true,
         };
         if changed {
-            let _ = self.requests.send(setting);
+            let _ = self.requests.send(Request::Change(setting));
             cx.notify();
         }
+    }
+
+    /// Connects a paired headset, like the Connect button for AirPods.
+    pub fn connect(&mut self, name: String, cx: &mut Context<Self>) {
+        self.notice = None;
+        self.connecting = Some(name.clone());
+        let _ = self.requests.send(Request::Connect(name));
+        cx.notify();
     }
 }

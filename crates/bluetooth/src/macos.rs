@@ -19,9 +19,9 @@ use objc2_io_bluetooth::{
     IOBluetoothDevice, IOBluetoothRFCOMMChannel, IOBluetoothRFCOMMChannelDelegate, IOBluetoothSDPUUID,
     kBluetoothDeviceClassMajorAudio,
 };
-use sc_core::{Driver, Frame, Output, SERVICES, Setting, channel_service, driver_for};
+use sc_core::{Driver, Frame, Output, SERVICES, channel_service, driver_for};
 
-use crate::Event;
+use crate::{Event, Request};
 
 /// Wait between attempts to find the headset, growing while it keeps failing.
 const RETRY_CONNECT: [Duration; 4] =
@@ -37,7 +37,10 @@ struct Connection {
     driver: Box<dyn Driver>,
 }
 
-pub fn run(name_filter: Option<String>, requests: mpsc::Receiver<Setting>, events: async_channel::Sender<Event>) {
+/// Drives the panel when it runs on a Mac during development; the native Mac
+/// app has its own link, which also connects paired headsets, so
+/// [`Request::Connect`] is ignored here.
+pub fn run(name_filter: Option<String>, requests: mpsc::Receiver<Request>, events: async_channel::Sender<Event>) {
     let delegate = Delegate::new();
     let services = services();
     let mut searching = false;
@@ -84,7 +87,7 @@ pub fn run(name_filter: Option<String>, requests: mpsc::Receiver<Setting>, event
 fn serve(
     delegate: &Delegate,
     connection: &mut Connection,
-    requests: &mpsc::Receiver<Setting>,
+    requests: &mpsc::Receiver<Request>,
     events: &async_channel::Sender<Event>,
 ) -> bool {
     let Connection { channel, driver, .. } = connection;
@@ -104,7 +107,8 @@ fn serve(
         }
 
         match requests.recv_timeout(POLL) {
-            Ok(setting) => write(channel, driver.set(setting, now)),
+            Ok(Request::Change(setting)) => write(channel, driver.set(setting, now)),
+            Ok(Request::Connect(_)) => {}
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => return false,
         }

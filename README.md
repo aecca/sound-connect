@@ -66,7 +66,7 @@ If you change the mode with the button on your headphones, Sound Connect shows t
   </picture>
 </p>
 
-On Linux, the equalizer, DSEE and one-click connect are coming soon.
+On Linux, the equalizer is coming soon.
 
 ## Light and fast
 

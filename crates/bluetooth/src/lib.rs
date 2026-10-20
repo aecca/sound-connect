@@ -1,6 +1,6 @@
 //! Keeps a link to a connected headset on a background thread.
 //!
-//! The UI sends [`Setting`]s and receives [`Event`]s. The thread finds a
+//! The UI sends [`Request`]s and receives [`Event`]s. The thread finds a
 //! headset offering a supported control service, opens that channel, lets
 //! the brand's [driver](sc_core::Driver) speak to it and reconnects on its
 //! own when the headset goes away.
@@ -20,6 +20,11 @@ mod unsupported;
 pub enum Event {
     /// No supported headset is connected; still looking.
     Searching,
+    /// Supported headsets paired with this computer but not connected, by
+    /// name, which [`Request::Connect`] can connect.
+    Paired(Vec<String>),
+    /// Connecting a paired headset didn't work, e.g. because it's off.
+    ConnectFailed,
     Connected {
         name: String,
     },
@@ -29,8 +34,17 @@ pub enum Event {
     Unsupported(String),
 }
 
+/// What the UI asks of the link.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Request {
+    /// A change for the connected headset.
+    Change(Setting),
+    /// Connect this paired headset, by name, while none is connected.
+    Connect(String),
+}
+
 pub struct Link {
-    pub requests: mpsc::Sender<Setting>,
+    pub requests: mpsc::Sender<Request>,
     pub events: async_channel::Receiver<Event>,
 }
 

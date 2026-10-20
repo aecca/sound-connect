@@ -5,7 +5,7 @@
 
 use std::time::{Duration, Instant};
 
-use sc_bluetooth::Event;
+use sc_bluetooth::{Event, Request};
 use sc_core::{ListeningMode, Setting, Update};
 
 fn main() {
@@ -38,9 +38,9 @@ fn main() {
                 let Some(mode) = mode else { break };
                 sent = true;
                 println!("-> {mode:?}");
-                link.requests.send(Setting::Mode(mode)).expect("the link is running");
+                link.requests.send(Request::Change(Setting::Mode(mode))).expect("the link is running");
                 if let Some(level) = level {
-                    link.requests.send(Setting::AmbientLevel(level)).expect("the link is running");
+                    link.requests.send(Request::Change(Setting::AmbientLevel(level))).expect("the link is running");
                 }
             }
             Event::Update(Update::Mode(_)) => break,

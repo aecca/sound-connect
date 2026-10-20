@@ -13,12 +13,12 @@ use std::time::{Duration, Instant};
 use bluer::rfcomm::{Profile, ProfileHandle, ReqError, Role, Stream};
 use bluer::{Device, Uuid};
 use futures::{FutureExt, StreamExt};
-use sc_core::{Driver, Frame, Output, SERVICES, Setting, channel_service, driver_for};
+use sc_core::{Driver, Frame, Output, SERVICES, channel_service, driver_for};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 use tokio::time;
 
-use crate::Event;
+use crate::{Event, Request};
 
 /// Wait between attempts to find the headset, growing while it keeps failing.
 const RETRY_CONNECT: [Duration; 4] =
@@ -29,8 +29,11 @@ const TICK: Duration = Duration::from_millis(100);
 /// How long BlueZ gets to look up the channel and open it.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const DISCONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long a headset gets to set up its audio after connecting, before its
+/// control channel is opened.
+const SETTLE_AFTER_CONNECTING: Duration = Duration::from_millis(1500);
 
-pub fn run(name_filter: Option<String>, requests: mpsc::Receiver<Setting>, events: async_channel::Sender<Event>) {
+pub fn run(name_filter: Option<String>, requests: mpsc::Receiver<Request>, events: async_channel::Sender<Event>) {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -38,8 +41,8 @@ pub fn run(name_filter: Option<String>, requests: mpsc::Receiver<Setting>, event
     runtime.block_on(link(name_filter, forward(requests), events));
 }
 
-/// Moves settings from the UI onto a channel the runtime can await.
-fn forward(requests: mpsc::Receiver<Setting>) -> UnboundedReceiver<Setting> {
+/// Moves requests from the UI onto a channel the runtime can await.
+fn forward(requests: mpsc::Receiver<Request>) -> UnboundedReceiver<Request> {
     let (tx, rx) = unbounded_channel();
     std::thread::Builder::new()
         .name("bluetooth-requests".into())
@@ -56,13 +59,14 @@ fn forward(requests: mpsc::Receiver<Setting>) -> UnboundedReceiver<Setting> {
 
 async fn link(
     name_filter: Option<String>,
-    mut requests: UnboundedReceiver<Setting>,
+    mut requests: UnboundedReceiver<Request>,
     events: async_channel::Sender<Event>,
 ) {
     let services = services();
     let mut bluez = None;
     let mut searching = false;
     let mut failures = 0;
+    let mut offered = Vec::new();
     loop {
         if bluez.is_none() {
             bluez = bluer::Session::new()
@@ -96,14 +100,54 @@ async fn link(
             }
         }
 
-        // Wait before looking again. Settings changed meanwhile are dropped:
-        // the UI reads everything again once a headset connects.
+        // Offer the paired headsets that aren't connected.
+        if let Some(bluez) = &bluez {
+            let paired = paired(bluez, &services, name_filter.as_deref()).await;
+            if paired != offered {
+                offered.clone_from(&paired);
+                let _ = events.send(Event::Paired(paired)).await;
+            }
+        }
+
+        // Wait before looking again, unless the user picks a headset to connect.
         let delay = RETRY_CONNECT[failures.min(RETRY_CONNECT.len() - 1)];
-        let app_gone = time::timeout(delay, async { while requests.recv().await.is_some() {} }).await.is_ok();
-        if app_gone || events.is_closed() {
+        match time::timeout(delay, picked(&mut requests)).await {
+            Ok(Some(name)) => {
+                let connected = match &bluez {
+                    Some(bluez) => connect_paired(bluez, &name).await,
+                    None => Err("BlueZ isn't running".into()),
+                };
+                match connected {
+                    Ok(()) => {
+                        failures = 0;
+                        time::sleep(SETTLE_AFTER_CONNECTING).await;
+                    }
+                    Err(error) => {
+                        eprintln!("bluetooth: can't connect {name}: {error}");
+                        let _ = events.send(Event::ConnectFailed).await;
+                    }
+                }
+            }
+            // The app has gone away.
+            Ok(None) => return,
+            Err(_) => {}
+        }
+        if events.is_closed() {
             return;
         }
     }
+}
+
+/// Waits for the user to pick a paired headset to connect. Settings changed
+/// meanwhile are dropped: the UI reads everything again once a headset
+/// connects. `None` once the app has gone away.
+async fn picked(requests: &mut UnboundedReceiver<Request>) -> Option<String> {
+    while let Some(request) = requests.recv().await {
+        if let Request::Connect(name) = request {
+            return Some(name);
+        }
+    }
+    None
 }
 
 /// Talks to the headset until the channel closes. Returns false when the app
@@ -111,7 +155,7 @@ async fn link(
 async fn serve(
     stream: &mut Stream,
     driver: &mut dyn Driver,
-    requests: &mut UnboundedReceiver<Setting>,
+    requests: &mut UnboundedReceiver<Request>,
     events: &async_channel::Sender<Event>,
 ) -> bool {
     let mut frames = deliver(driver.start(Instant::now()), events).await;
@@ -129,8 +173,10 @@ async fn serve(
                 let Ok(n @ 1..) = read else { return true };
                 deliver(driver.receive(&buffer[..n], Instant::now()), events).await
             }
-            setting = requests.recv() => match setting {
-                Some(setting) => driver.set(setting, Instant::now()),
+            request = requests.recv() => match request {
+                Some(Request::Change(setting)) => driver.set(setting, Instant::now()),
+                // A headset is already connected.
+                Some(Request::Connect(_)) => Vec::new(),
                 None => return false,
             },
             _ = tick.tick() => driver.tick(Instant::now()),
@@ -257,16 +303,62 @@ async fn headsets(
     name_filter: Option<&str>,
 ) -> Vec<Headset> {
     let mut found = Vec::new();
-    for name in bluez.adapter_names().await.unwrap_or_default() {
-        let Ok(adapter) = bluez.adapter(&name) else { continue };
-        for address in adapter.device_addresses().await.unwrap_or_default() {
-            let Ok(device) = adapter.device(address) else { continue };
-            if let Ok(Some(headset)) = Headset::check(device, services, name_filter).await {
-                found.push(headset);
-            }
+    for device in devices(bluez).await {
+        if let Ok(Some(headset)) = Headset::check(device, services, name_filter).await {
+            found.push(headset);
         }
     }
     found
+}
+
+/// Every device BlueZ knows, on every adapter.
+async fn devices(bluez: &bluer::Session) -> Vec<Device> {
+    let mut devices = Vec::new();
+    for name in bluez.adapter_names().await.unwrap_or_default() {
+        let Ok(adapter) = bluez.adapter(&name) else { continue };
+        for address in adapter.device_addresses().await.unwrap_or_default() {
+            devices.extend(adapter.device(address));
+        }
+    }
+    devices
+}
+
+/// The names of supported headsets that are paired but not connected.
+async fn paired(bluez: &bluer::Session, services: &[(&'static str, Uuid)], name_filter: Option<&str>) -> Vec<String> {
+    let mut names = Vec::new();
+    for device in devices(bluez).await {
+        if let Ok(Some(name)) = disconnected_headset(&device, services, name_filter).await {
+            names.push(name);
+        }
+    }
+    names.sort();
+    names
+}
+
+async fn disconnected_headset(
+    device: &Device,
+    services: &[(&'static str, Uuid)],
+    name_filter: Option<&str>,
+) -> bluer::Result<Option<String>> {
+    if !device.is_paired().await? || device.is_connected().await? {
+        return Ok(None);
+    }
+    let name = device.alias().await?;
+    if name_filter.is_some_and(|filter| !name.contains(filter)) {
+        return Ok(None);
+    }
+    let uuids = device.uuids().await?.unwrap_or_default();
+    Ok(services.iter().any(|(_, uuid)| uuids.contains(uuid)).then_some(name))
+}
+
+/// Connects a paired headset by name, as the system's Bluetooth settings would.
+async fn connect_paired(bluez: &bluer::Session, name: &str) -> Result<(), Box<dyn Error>> {
+    for device in devices(bluez).await {
+        if device.alias().await.is_ok_and(|alias| alias == name) {
+            return Ok(time::timeout(CONNECT_TIMEOUT, device.connect()).await??);
+        }
+    }
+    Err(format!("no paired device is called {name}").into())
 }
 
 /// Registers a client profile for each service the headsets use. BlueZ

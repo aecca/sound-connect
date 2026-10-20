@@ -349,6 +349,29 @@ impl Panel {
         Some(row.text_color(p.label))
     }
 
+    /// While no headset is connected: what's going on, and a button to
+    /// connect each supported headset that's paired.
+    fn searching(&self, p: Palette, cx: &App) -> AnyElement {
+        let headset = self.headset.read(cx);
+        if let Some(name) = &headset.connecting {
+            return Self::message(&format!("Connecting {name}…"), "", p).into_any_element();
+        }
+        let body = headset.notice.unwrap_or("Make sure they're on and connected to this computer.");
+        let buttons = headset.paired.iter().map(|name| {
+            let (entity, name) = (self.headset.clone(), name.clone());
+            Button::new(SharedString::from(format!("connect {name}")))
+                .label(format!("Connect {name}"))
+                .small()
+                .w_full()
+                .on_click(move |_, _, cx| entity.update(cx, |headset, cx| headset.connect(name.clone(), cx)))
+        });
+        v_flex()
+            .flex_1()
+            .child(Self::message("Looking for your headphones", body, p))
+            .child(v_flex().px_6().pb_4().gap_2().children(buttons))
+            .into_any_element()
+    }
+
     fn message(title: &str, body: &str, p: Palette) -> impl IntoElement {
         v_flex()
             .flex_1()
@@ -383,10 +406,7 @@ impl Render for Panel {
         let p = Palette::for_window(window);
         let headset = self.headset.read(cx);
         let body = match (&headset.connection, &headset.device) {
-            (Connection::Searching, _) => {
-                Self::message("Looking for your headphones", "Make sure they're on and connected to this computer.", p)
-                    .into_any_element()
-            }
+            (Connection::Searching, _) => self.searching(p, cx),
             (Connection::Unsupported(reason), _) => {
                 Self::message("These headphones aren't supported yet", reason, p).into_any_element()
             }
