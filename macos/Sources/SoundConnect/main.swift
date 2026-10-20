@@ -2,6 +2,7 @@
 
 import AppKit
 import ServiceManagement
+import SoundConnectCore
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -24,6 +25,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu = StatusMenu(
             model: model, updater: updater, calls: Calls(model: model), shortcut: ModeShortcut(model: model))
         updater.start()
+    }
+
+    /// Links for Shortcuts, Raycast or a script: soundconnect://mode/next
+    /// switches to the next mode, soundconnect://mode/ambient (or another
+    /// mode's ID) to that one.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls where url.host == "mode" {
+            switch url.lastPathComponent {
+            case "next": model.switchToNextMode()
+            case let id:
+                guard let mode = listeningModeFromId(id: id),
+                    model.device?.modes.contains(where: { $0.mode == mode }) == true
+                else { continue }
+                model.change(.mode(mode: mode))
+            }
+        }
     }
 
     /// Opening the app again, e.g. from Spotlight, shows its menu: macOS

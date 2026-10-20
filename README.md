@@ -79,6 +79,25 @@ sound-connect mode next
 
 To go straight to one mode, use `sound-connect mode ambient`, `sound-connect mode noise-cancelling` or `sound-connect mode off` instead. On GNOME, shortcuts are in Settings › Keyboard › Keyboard Shortcuts › Custom Shortcuts. On Omarchy and other Hyprland setups, add it to your Hyprland key bindings.
 
+## Shortcuts, scripts and status bars
+
+On a Mac, these links switch modes from the Shortcuts app, Raycast, Alfred or Terminal (`open soundconnect://mode/next`):
+
+- `soundconnect://mode/next`
+- `soundconnect://mode/ambient`, `soundconnect://mode/noise-cancelling` or `soundconnect://mode/off`
+
+On Linux, `sound-connect status` shows the mode and battery level, and `sound-connect status --json` gives the same for scripts. Add `--follow` to keep it coming whenever something changes. For example, a [Waybar](https://github.com/Alexays/Waybar) module that shows the battery and switches modes when clicked:
+
+```json
+"custom/headphones": {
+  "exec": "sound-connect status --json --follow",
+  "return-type": "json",
+  "format": "🎧 {}",
+  "on-click": "sound-connect mode next",
+  "restart-interval": 10
+}
+```
+
 ## Supported headphones
 
 **Sony**

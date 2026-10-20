@@ -8,6 +8,7 @@ mod icon;
 mod microphone;
 mod panel;
 mod settings;
+mod status;
 mod tray;
 mod update;
 

@@ -42,6 +42,8 @@ scripts/package-linux.sh docker     # the same, from any machine with Docker
 
 To build, test and lint for Linux from a Mac, see the comment at the top of `scripts/linux.Dockerfile`.
 
+The app answers the `sound-connect` command (`mode`, `status`, and opening its panel when started again) over a Unix socket in `$XDG_RUNTIME_DIR`; see `crates/app/src/control.rs`. Its own preferences live in `$XDG_CONFIG_HOME/sound-connect/settings.json`.
+
 ## Tests
 
 ```sh

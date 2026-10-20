@@ -38,6 +38,13 @@ bundle() { # <binary> <bundle path> <bundle id> <display name>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><true/>
   <key>NSBluetoothAlwaysUsageDescription</key><string>Sound Connect uses Bluetooth to read and change your headphone settings.</string>
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key><string>$id</string>
+      <key>CFBundleURLSchemes</key><array><string>soundconnect</string></array>
+    </dict>
+  </array>
 </dict>
 </plist>
 EOF

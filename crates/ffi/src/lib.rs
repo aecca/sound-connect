@@ -269,6 +269,13 @@ pub fn feature_description(feature: Feature) -> String {
     feature.description().to_owned()
 }
 
+/// The listening mode with this ID ("ambient", "noise-cancelling", ...), as
+/// commands and links name it.
+#[uniffi::export]
+pub fn listening_mode_from_id(id: String) -> Option<ListeningMode> {
+    ListeningMode::from_id(&id)
+}
+
 #[uniffi::export]
 pub fn auto_off_name(auto_off: AutoOff) -> String {
     sc_core::AutoOff::from(auto_off).name()

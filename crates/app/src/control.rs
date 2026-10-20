@@ -1,10 +1,11 @@
 //! Lets other programs control the running app. The `sound-connect` command
 //! talks to it over a Unix socket in `$XDG_RUNTIME_DIR`: a keyboard shortcut
-//! can run `sound-connect mode next`, and running `sound-connect` again opens
-//! the panel of the app that's already running instead of starting another.
+//! can run `sound-connect mode next`, a status bar `sound-connect status
+//! --json --follow`, and running `sound-connect` again opens the panel of the
+//! app that's already running instead of starting another.
 //!
 //! A client sends one line, the command, and gets back lines starting with
-//! `ok ` or `error `.
+//! `ok ` or `error `: one, or one per change while it follows the status.
 
 use std::io::{self, BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -17,7 +18,7 @@ use gpui_kit::*;
 use sc_core::{Device, ListeningMode, Mode, Setting};
 
 use crate::headset::Headset;
-use crate::tray;
+use crate::{status, tray};
 
 /// How long the command waits for the app to answer.
 const ANSWER_TIMEOUT: Duration = Duration::from_secs(5);
@@ -28,39 +29,43 @@ Usage: sound-connect [command]
 With no command, opens Sound Connect, or its panel when it's already open.
 
 Commands:
-  mode next     Switch to the next listening mode
-  mode <mode>   Switch to off, ambient, noise-cancelling, noise-cancelling-low
-                or wind-reduction, when the headphones have it
-  --version     Show the version";
+  mode next                Switch to the next listening mode
+  mode <mode>              Switch to off, ambient, noise-cancelling,
+                           noise-cancelling-low or wind-reduction, when the
+                           headphones have it
+  status                   Show the headphones' mode and battery
+  status --json            The same as JSON, for scripts and status bars
+  status [--json] --follow Show it again whenever it changes
+  --version                Show the version";
 
 /// Runs the `sound-connect` command with these arguments.
 pub fn run(args: &[String]) -> ExitCode {
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     let command = match args[..] {
-        ["mode", mode] => format!("mode {mode}"),
+        ["mode", mode] => Some(format!("mode {mode}")),
+        ["status", ref flags @ ..] => status_command(flags),
         ["help" | "--help" | "-h"] => {
             println!("{USAGE}");
             return ExitCode::SUCCESS;
         }
-        _ => {
-            eprintln!("{USAGE}");
-            return ExitCode::from(2);
-        }
+        _ => None,
     };
-    match send(&command) {
-        Ok(answers) => {
-            let mut code = ExitCode::SUCCESS;
-            for answer in answers {
-                match answer {
-                    Ok(text) => println!("{text}"),
-                    Err(text) => {
-                        eprintln!("{text}");
-                        code = ExitCode::FAILURE;
-                    }
-                }
-            }
-            code
+    let Some(command) = command else {
+        eprintln!("{USAGE}");
+        return ExitCode::from(2);
+    };
+
+    let mut code = ExitCode::SUCCESS;
+    let sent = send(&command, |answer| match answer {
+        Ok(text) => writeln!(io::stdout(), "{text}").is_ok(),
+        Err(text) => {
+            eprintln!("{text}");
+            code = ExitCode::FAILURE;
+            true
         }
+    });
+    match sent {
+        Ok(()) => code,
         Err(_) => {
             eprintln!("Sound Connect isn't running.");
             ExitCode::FAILURE
@@ -68,37 +73,62 @@ pub fn run(args: &[String]) -> ExitCode {
     }
 }
 
-/// Asks the running app to open its panel. Fails when none is running.
-pub fn show_running() -> io::Result<()> {
-    send("show").map(|_| ())
+/// `status` with `--json` and `--follow`, in any order, as the app reads it.
+fn status_command(flags: &[&str]) -> Option<String> {
+    let (json, follow) = (flags.contains(&"--json"), flags.contains(&"--follow"));
+    let known = usize::from(json) + usize::from(follow) == flags.len();
+    known.then(|| ["status", if json { " json" } else { "" }, if follow { " follow" } else { "" }].concat())
 }
 
-/// Sends a command to the running app and collects its answers.
-fn send(command: &str) -> io::Result<Vec<Result<String, String>>> {
+/// Asks the running app to open its panel. Fails when none is running.
+pub fn show_running() -> io::Result<()> {
+    send("show", |_| true)
+}
+
+/// Sends a command to the running app and passes on its answers until it's
+/// done, or until `answer` returns false.
+fn send(command: &str, mut answer: impl FnMut(Result<String, String>) -> bool) -> io::Result<()> {
     let mut stream = UnixStream::connect(socket_path().ok_or(io::ErrorKind::NotFound)?)?;
-    stream.set_read_timeout(Some(ANSWER_TIMEOUT))?;
+    // Following waits for changes, as long as they take.
+    let follows = command.ends_with(" follow");
+    stream.set_read_timeout((!follows).then_some(ANSWER_TIMEOUT))?;
     writeln!(stream, "{command}")?;
-    let mut answers = Vec::new();
     for line in BufReader::new(stream).lines() {
         let line = line?;
-        answers.push(match line.split_once(' ') {
+        let parsed = match line.split_once(' ') {
             Some(("ok", text)) => Ok(text.to_owned()),
             Some((_, text)) => Err(text.to_owned()),
             None if line == "ok" => Ok(String::new()),
             None => Err(line),
-        });
+        };
+        if !answer(parsed) {
+            break;
+        }
     }
-    Ok(answers)
+    Ok(())
 }
 
 fn socket_path() -> Option<PathBuf> {
     std::env::var_os("XDG_RUNTIME_DIR").map(|dir| PathBuf::from(dir).join("sound-connect.sock"))
 }
 
-/// A command from a client, and where its answer goes.
+type Answers = async_channel::Sender<Result<String, String>>;
+
+/// A command from a client, and where its answers go.
 struct Request {
     command: String,
-    answer: async_channel::Sender<Result<String, String>>,
+    answers: Answers,
+}
+
+/// Clients following the status, and what each was last told.
+struct Followers(Vec<Follower>);
+
+impl Global for Followers {}
+
+struct Follower {
+    json: bool,
+    answers: Answers,
+    last: String,
 }
 
 /// Starts answering commands. Without `$XDG_RUNTIME_DIR` there's nowhere
@@ -127,10 +157,11 @@ pub fn serve(headset: Entity<Headset>, cx: &mut App) {
         })
         .expect("failed to start the control thread");
 
+    cx.set_global(Followers(Vec::new()));
+    cx.observe(&headset, |headset, cx| tell_followers(&headset, cx)).detach();
     cx.spawn(async move |cx| {
         while let Ok(request) = received.recv().await {
-            let answer = cx.update(|cx| answer(&request.command, &headset, cx));
-            let _ = request.answer.send(answer).await;
+            cx.update(|cx| handle(request, &headset, cx));
         }
     })
     .detach();
@@ -144,12 +175,12 @@ fn serve_client(mut stream: UnixStream, requests: &async_channel::Sender<Request
     if read.is_err() {
         return;
     }
-    let (answer, answers) = async_channel::bounded(1);
-    let request = Request { command: command.trim().to_owned(), answer };
+    let (answers, answered) = async_channel::unbounded();
+    let request = Request { command: command.trim().to_owned(), answers };
     if requests.send_blocking(request).is_err() {
         return;
     }
-    while let Ok(answer) = answers.recv_blocking() {
+    while let Ok(answer) = answered.recv_blocking() {
         let line = match answer {
             Ok(text) if text.is_empty() => "ok".to_owned(),
             Ok(text) => format!("ok {text}"),
@@ -161,15 +192,39 @@ fn serve_client(mut stream: UnixStream, requests: &async_channel::Sender<Request
     }
 }
 
-fn answer(command: &str, headset: &Entity<Headset>, cx: &mut App) -> Result<String, String> {
-    match command.split_once(' ') {
-        None if command == "show" => {
+fn handle(request: Request, headset: &Entity<Headset>, cx: &mut App) {
+    let words: Vec<&str> = request.command.split(' ').collect();
+    let answer = match words[..] {
+        ["show"] => {
             tray::show(headset, cx);
             Ok(String::new())
         }
-        Some(("mode", mode)) => headset.update(cx, |headset, cx| switch_mode(headset, mode, cx)),
-        _ => Err(format!("Unknown command \"{command}\". Run sound-connect --help to see them all.")),
-    }
+        ["mode", mode] => headset.update(cx, |headset, cx| switch_mode(headset, mode, cx)),
+        ["status", ref options @ ..] => {
+            let json = options.contains(&"json");
+            let line = if json { status::json(headset.read(cx)) } else { status::text(headset.read(cx)) };
+            if options.contains(&"follow") {
+                let follower = Follower { json, answers: request.answers.clone(), last: line.clone() };
+                cx.global_mut::<Followers>().0.push(follower);
+            }
+            Ok(line)
+        }
+        _ => Err(format!("Unknown command \"{}\". Run sound-connect --help to see them all.", request.command)),
+    };
+    let _ = request.answers.try_send(answer);
+}
+
+/// Tells each follower the status, if it changed since they last heard.
+fn tell_followers(headset: &Entity<Headset>, cx: &mut App) {
+    let (json, text) = (status::json(headset.read(cx)), status::text(headset.read(cx)));
+    cx.global_mut::<Followers>().0.retain_mut(|follower| {
+        let line = if follower.json { &json } else { &text };
+        if *line == follower.last {
+            return !follower.answers.is_closed();
+        }
+        follower.last.clone_from(line);
+        follower.answers.try_send(Ok(line.clone())).is_ok()
+    });
 }
 
 /// Switches to `mode`, a mode's ID or "next", and says which mode that is.
@@ -199,7 +254,7 @@ mod tests {
     use sc_core::{Brand, Device, ListeningMode::*, Mode};
 
     // Not a glob import: GPUI's own `test` attribute would shadow the built-in one.
-    use super::mode_for;
+    use super::{mode_for, status_command};
 
     fn bose() -> Device {
         let mut device = Device::unidentified(Brand::Bose, "QuietComfort 35 II");
@@ -226,5 +281,14 @@ mod tests {
             error,
             "These headphones have no mode \"ambient\". Try next, off, noise-cancelling-low, noise-cancelling."
         );
+    }
+
+    #[test]
+    fn reads_the_status_flags_in_any_order() {
+        assert_eq!(status_command(&[]).as_deref(), Some("status"));
+        assert_eq!(status_command(&["--follow", "--json"]).as_deref(), Some("status json follow"));
+        assert_eq!(status_command(&["--follow"]).as_deref(), Some("status follow"));
+        assert_eq!(status_command(&["--json", "--json"]), None);
+        assert_eq!(status_command(&["--color"]), None);
     }
 }
