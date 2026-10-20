@@ -139,6 +139,7 @@ Sound Connect shows only the settings your model has. Older Sony models, such as
 - **It keeps saying "Looking for your headphones".** Make sure they're on and connected to this computer in its Bluetooth settings. If they are, turn them off and on again.
 - **On a Mac, it never finds them.** Check that Sound Connect is allowed in System Settings › Privacy & Security › Bluetooth.
 - **On Linux, Bluetooth is off.** Turn it on with `sudo systemctl enable --now bluetooth`.
+- **I don't see Ambient Sound During Calls.** It needs macOS 14.2 or later on a Mac, and PipeWire on Linux, which Omarchy, Ubuntu since 22.10 and most other current systems use.
 
 Still stuck? [Open an issue](https://github.com/aecca/sound-connect/issues) and include your headphones model and computer.
 
