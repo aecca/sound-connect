@@ -7,7 +7,7 @@
 #   scripts/macos.sh app            Build "Sound Connect.app" into dist/ and open it
 #   scripts/macos.sh package        Build the release: a universal app zipped in dist/
 #   scripts/macos.sh icon           Rebuild macos/AppIcon.icns from assets/icon.svg
-#   scripts/macos.sh snapshots      Retake the README pictures in docs/images
+#   scripts/macos.sh snapshots      Retake the README pictures and cover in docs/images
 #   scripts/macos.sh gpui           Build the GPUI app (the Linux UI) and open it
 #   scripts/macos.sh probe [args]   Build the probe example and print its output
 set -euo pipefail
@@ -132,6 +132,7 @@ case "${1:-run}" in
     swift build --package-path macos --disable-sandbox
     SOUND_CONNECT_SNAPSHOTS="$PWD/docs/images" \
       "$(swift build --package-path macos --disable-sandbox --show-bin-path)/SoundConnect"
+    swift scripts/render-cover.swift assets/icon.svg docs/images
     echo "Saved pictures in docs/images"
     ;;
   gpui)

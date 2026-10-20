@@ -1,64 +1,31 @@
-<p align="center">
-  <img src="assets/icon.png" width="128" height="128" alt="Sound Connect icon">
-</p>
-
-<h1 align="center">Sound Connect</h1>
-
-<p align="center">
-  <strong>Your Sony and Bose headphones, one click away.</strong><br>
-  A tiny, instant app for your Mac or Linux computer. No phone needed.
-</p>
-
-<p align="center">
-  <a href="https://github.com/aecca/sound-connect/releases/latest"><img alt="Latest version" src="https://img.shields.io/github/v/release/aecca/sound-connect?label=version"></a>
-  <img alt="Beta" src="https://img.shields.io/badge/status-beta-orange">
-  <img alt="Works on macOS and Linux" src="https://img.shields.io/badge/works%20on-macOS%20%7C%20Linux-blue">
-  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-green"></a>
-</p>
+<div align="center">
+  <h1>Sound Connect</h1>
+  <p><b>Switch noise cancelling, shape the sound and check the battery of your Sony and Bose headphones, right from your menu bar. A tiny, free app for Mac and Linux. No phone needed.</b></p>
+  <a href="https://github.com/aecca/sound-connect/releases/latest"><img alt="Latest version" src="https://img.shields.io/github/v/release/aecca/sound-connect?label=version&style=flat-square"></a>
+  <img alt="Beta" src="https://img.shields.io/badge/status-beta-orange?style=flat-square">
+  <img alt="Works on macOS and Linux" src="https://img.shields.io/badge/works%20on-macOS%20%7C%20Linux-blue?style=flat-square">
+  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-green?style=flat-square"></a>
+  <a href="https://github.com/aecca/sound-connect/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/aecca/sound-connect?style=flat-square"></a>
+</div>
 
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/images/menu-dark.png">
-    <img src="docs/images/menu-light.png" width="356" alt="The Sound Connect menu: noise control, ambient sound level, Speak-to-Chat, equalizer and battery">
-  </picture>
+  <img src="docs/images/cover.png" width="1000" alt="Sound Connect, your headphones one click away: its menu with noise control, Speak-to-Chat and battery, and its equalizer">
 </p>
 
-> [!NOTE]
-> **Sound Connect is in beta.** It's new and still being tested, so some things may not work perfectly yet. If you run into a problem, please [let us know](https://github.com/aecca/sound-connect/issues).
+> 💡 **Sound Connect is in beta.** It's new and still being tested, so some things may not work perfectly yet. If you run into a problem, please [let us know](https://github.com/aecca/sound-connect/issues).
 
-## Install
+## Features
 
-Open a terminal, paste this line and press Enter:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/aecca/sound-connect/main/install.sh | bash
-```
-
-That's it. It works on **Mac**, **Ubuntu** and **Omarchy**, and on other Linux systems based on Debian or Arch. Sound Connect opens right away, and again every time you log in.
-
-On Linux, it may ask for your password to add a few small system packages, but only if they're missing.
-
-When there's a new version, **Update** appears in Sound Connect's menu. One click installs it.
-
-## What you can do
-
-Sound Connect sits in your menu bar (or your system tray on Linux). Click the headphones icon to:
-
-- 🎧 Switch between **Noise Cancelling**, **Ambient Sound** and **Off**
-- 🔊 Choose how much outside sound you hear, and turn on **Focus on Voice**
-- 💬 Turn **Speak-to-Chat** on or off, the feature that lets in outside sound when you start talking, and choose how readily it notices you and when it goes back
-- 📞 Switch to **Ambient Sound during calls** on its own, so you hear your own voice, and back when the call ends
-- 🎚️ Pick an **equalizer** preset, or shape your own sound
-- ✨ Turn on **DSEE Extreme** to bring back detail in compressed music
-- 🔕 Turn **voice prompts** on or off, and choose when your headphones **turn off** on their own
-- ⏸️ **Pause music** when you take your headphones off
-- 🔘 Choose what the **noise control button** on your headphones switches between, or have the **Action button** on Bose headphones change noise cancelling
-- 🔋 See your **battery level**, including each earbud and the case, and get a **notification** when it runs low. On a Mac it can also show next to the menu bar icon
-- 🔗 **Connect** your headphones with one click when they're paired but not connected
-- 📱 When your Sony headphones are connected to your phone and your computer at once, choose which one you **hear**
-- ⌨️ Switch modes with a **keyboard shortcut**, from any app
-
-If you change the mode with the button on your headphones, Sound Connect shows the change right away.
+- **No phone needed**: Everything you'd open your headphones' phone app for, one click away in your menu bar or system tray
+- **Noise control**: Switch between Noise Cancelling, Ambient Sound and Off, choose how much outside sound you hear, and turn on Focus on Voice
+- **Hear yourself on calls**: Switches to Ambient Sound on its own when a call starts, and back when it ends
+- **Shape your sound**: Pick an equalizer preset or make your own, and turn on DSEE Extreme to bring back detail in compressed music
+- **Battery at a glance**: See each earbud and the case, get a notification when it runs low, and on a Mac, see it next to the menu bar icon
+- **Smart settings**: Speak-to-Chat and how readily it notices you, voice prompts, pausing music when you take your headphones off, and when they turn off on their own
+- **Buttons your way**: Choose what the noise control button switches between, or have the Bose Action button change noise cancelling
+- **Switch devices**: When your Sony headphones are connected to your phone and your computer at once, choose which one you hear
+- **One-click connect**: Connect your headphones when they're paired but not connected
+- **Shortcuts and scripts**: Switch modes with a keyboard shortcut in any app, from Shortcuts, Raycast or Alfred, or show your headphones in Waybar
 
 <p align="center">
   <picture>
@@ -67,14 +34,39 @@ If you change the mode with the button on your headphones, Sound Connect shows t
   </picture>
 </p>
 
-## Tiny and instant
+## Quick Start
 
-- **Tiny.** About 1 MB to download on a Mac, and about 16 MB on Linux.
-- **Native.** On a Mac, it's a real macOS menu, made with the same tools as the system's own. On Linux, it's a native app too. Neither one hides a web browser inside, as many apps do.
-- **Instant.** Your headphones change the moment you click. When you press a button on them, Sound Connect shows it right away.
-- **Out of the way.** It opens when you log in and waits quietly in the menu bar or system tray. No account, no ads, and it works without internet.
+Sound Connect works on macOS 14 or newer, on Apple Silicon and Intel Macs, and on Ubuntu, Omarchy and other Linux systems based on Debian or Arch.
 
-## Keyboard shortcut
+**Install**
+
+Open a terminal, paste this line and press Enter:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/aecca/sound-connect/main/install.sh | bash
+```
+
+Sound Connect opens right away, and again every time you log in. On Linux, it may ask for your password to add a few small system packages, but only if they're missing.
+
+**First run**
+
+1. Connect your headphones to your computer in Bluetooth settings, as you normally would.
+2. Look for the headphones icon in your menu bar or system tray.
+3. On a Mac, you'll be asked whether Sound Connect can use Bluetooth. Click **Allow**.
+4. Click the icon to see and change your headphone settings.
+
+**Update**
+
+When there's a new version, **Update** appears in Sound Connect's menu. One click installs it.
+
+## Tiny and Instant
+
+- **Tiny**: About 1 MB to download on a Mac, and about 16 MB on Linux
+- **Native**: On a Mac, it's a real macOS menu, made with the same tools as the system's own. On Linux, it's a native app too. Neither one hides a web browser inside, as many apps do
+- **Instant**: Your headphones change the moment you click. When you press a button on them, Sound Connect shows it right away
+- **Out of the way**: It opens when you log in and waits quietly in the menu bar or system tray. No account, no ads, and it works without internet
+
+## Keyboard Shortcut
 
 On a Mac, turn on **Switch Modes with ⌃⌥⌘N** in Sound Connect's menu. Then press Control-Option-Command-N in any app to go to the next mode.
 
@@ -86,7 +78,7 @@ sound-connect mode next
 
 To go straight to one mode, use `sound-connect mode ambient`, `sound-connect mode noise-cancelling` or `sound-connect mode off` instead, or `noise-cancelling-low` and `wind-reduction` on headphones that have them. If your computer says it can't find `sound-connect`, log out and back in once after installing. On GNOME, shortcuts are in Settings › Keyboard › Keyboard Shortcuts › Custom Shortcuts. On Omarchy and other Hyprland setups, add it to your Hyprland key bindings.
 
-## Shortcuts, scripts and status bars
+## Shortcuts, Scripts and Status Bars
 
 On a Mac, these links switch modes from the Shortcuts app, Raycast, Alfred or Terminal (`open soundconnect://mode/next`):
 
@@ -106,7 +98,7 @@ On Linux, `sound-connect status` shows the mode and battery level, and `sound-co
 }
 ```
 
-## Supported headphones
+## Supported Headphones
 
 **Sony**
 
@@ -126,14 +118,7 @@ On Linux, `sound-connect status` shows the mode and battery level, and `sound-co
 
 Sound Connect shows only the settings your model has. Older Sony models, such as the WH-1000XM4 and WH-1000XM3, aren't supported yet.
 
-## First time
-
-1. Connect your headphones to your computer in Bluetooth settings, as you normally would.
-2. Look for the headphones icon in your menu bar or system tray.
-3. On a Mac, you'll be asked whether Sound Connect can use Bluetooth. Click **Allow**.
-4. Click the icon to see and change your headphone settings.
-
-## Something not working?
+## Something Not Working?
 
 - **I don't see the icon on my Mac.** When the menu bar is full, macOS hides the icons that don't fit beside the camera notch. Hold ⌘ and drag icons you don't need out of the menu bar, or quit menu bar apps you aren't using.
 - **I don't see the icon on Linux.** GNOME only shows tray icons with the [AppIndicator extension](https://extensions.gnome.org/extension/615/appindicator-support/). On Omarchy, the icon appears in the top bar's tray. Either way, opening Sound Connect again from your apps shows its panel.
@@ -150,15 +135,20 @@ Still stuck? [Open an issue](https://github.com/aecca/sound-connect/issues) and 
 curl -fsSL https://raw.githubusercontent.com/aecca/sound-connect/main/install.sh | bash -s -- --uninstall
 ```
 
-## Free and open source
+## Support
+
+- If Sound Connect makes your day a little easier, give it a star or share it with a friend who has Sony or Bose headphones
+- Have headphones that aren't supported yet, or an idea? [Open an issue](https://github.com/aecca/sound-connect/issues)
+
+## Free and Open Source
 
 Sound Connect is free and open source, released under the [MIT License](LICENSE). Anyone can use it, share it and help make it better. If you'd like to help, see [how it's built](docs/DEVELOPMENT.md).
 
-## Your privacy
+## Your Privacy
 
 Sound Connect talks directly to your headphones over Bluetooth. It doesn't need an account and doesn't collect anything. It only goes online to ask GitHub whether there's a new version, when it starts and once a day after that, and to download the new version when you click **Update**.
 
-## Not affiliated with Sony or Bose
+## Not Affiliated with Sony or Bose
 
 Sound Connect is an independent project. It isn't made, endorsed or supported by Sony or Bose. Sony, Bose and the product names mentioned here are trademarks of their owners.
 
