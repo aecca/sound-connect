@@ -42,11 +42,20 @@ pub fn install(headset: Entity<Headset>, cx: &mut App) {
 /// Opens the panel without a click and keeps it open. Used to check the
 /// design during development.
 pub fn open_now(headset: &Entity<Headset>, cx: &mut App) {
+    open_unclicked(headset, true, cx);
+}
+
+/// Opens the panel without a click, e.g. when the app is started again.
+pub fn show(headset: &Entity<Headset>, cx: &mut App) {
+    open_unclicked(headset, false, cx);
+}
+
+fn open_unclicked(headset: &Entity<Headset>, pinned: bool, cx: &mut App) {
     let state = cx.global::<PanelWindow>();
     if state.handle.is_none()
         && let Some(anchor) = state.tray.anchor()
     {
-        open(anchor, headset.clone(), true, cx);
+        open(anchor, headset.clone(), pinned, cx);
     }
 }
 

@@ -92,6 +92,14 @@ final class HeadsetModel {
         equalizer = nil
     }
 
+    /// Switches to the listening mode after the current one, in the order the
+    /// menu lists them, and back to the first after the last.
+    func switchToNextMode() {
+        guard let modes = device?.modes.map(\.mode), !modes.isEmpty else { return }
+        let next = mode.flatMap { modes.firstIndex(of: $0) }.map { modes[($0 + 1) % modes.count] } ?? modes[0]
+        change(.mode(mode: next))
+    }
+
     /// Applies a change the user made and sends it to the headset, unless
     /// nothing actually changed (a slider reports every position).
     func change(_ setting: Setting) {

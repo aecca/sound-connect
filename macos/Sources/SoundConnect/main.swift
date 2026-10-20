@@ -13,14 +13,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         if let folder = Snapshots.folder {
             let sample = Snapshots.sampleModel()
-            let menu = StatusMenu(model: sample, updater: updater, calls: Calls(model: sample))
+            let menu = StatusMenu(
+                model: sample, updater: updater, calls: Calls(model: sample), shortcut: ModeShortcut(model: sample))
             self.menu = menu
             Snapshots.take(menu: menu, model: sample, into: folder)
             return
         }
         LoginItem.enableOnFirstLaunch()
         link = HeadsetLink(model: model)
-        menu = StatusMenu(model: model, updater: updater, calls: Calls(model: model))
+        menu = StatusMenu(
+            model: model, updater: updater, calls: Calls(model: model), shortcut: ModeShortcut(model: model))
         updater.start()
     }
 

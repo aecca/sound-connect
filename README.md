@@ -54,6 +54,7 @@ Sound Connect sits in your menu bar (or your system tray on Linux). Click the he
 - ⏸️ **Pause music** when you take your headphones off
 - 🔋 See your **battery level**, including each earbud and the case
 - 🔗 **Connect** your headphones with one click when they're paired but not connected
+- ⌨️ Switch modes with a **keyboard shortcut**, from any app
 
 If you change the mode with the button on your headphones, Sound Connect shows the change right away.
 
@@ -65,6 +66,18 @@ If you change the mode with the button on your headphones, Sound Connect shows t
 </p>
 
 On Linux, the equalizer, DSEE and one-click connect are coming soon.
+
+## Keyboard shortcut
+
+On a Mac, turn on **Switch Modes with ⌃⌥⌘N** in Sound Connect's menu. Then press Control-Option-Command-N in any app to go to the next mode.
+
+On Linux, add a keyboard shortcut in your system settings that runs this command:
+
+```sh
+sound-connect mode next
+```
+
+To go straight to one mode, use `sound-connect mode ambient`, `sound-connect mode noise-cancelling` or `sound-connect mode off` instead. On GNOME, shortcuts are in Settings › Keyboard › Keyboard Shortcuts › Custom Shortcuts. On Omarchy and other Hyprland setups, add it to your Hyprland key bindings.
 
 ## Supported headphones
 
@@ -96,7 +109,7 @@ Sound Connect shows only the settings your model has. Older Sony models, such as
 ## Something not working?
 
 - **I don't see the icon on my Mac.** When the menu bar is full, macOS hides the icons that don't fit beside the camera notch. Hold ⌘ and drag icons you don't need out of the menu bar, or quit menu bar apps you aren't using.
-- **I don't see the icon on Linux.** GNOME only shows tray icons with the [AppIndicator extension](https://extensions.gnome.org/extension/615/appindicator-support/). On Omarchy, the icon appears in the top bar's tray.
+- **I don't see the icon on Linux.** GNOME only shows tray icons with the [AppIndicator extension](https://extensions.gnome.org/extension/615/appindicator-support/). On Omarchy, the icon appears in the top bar's tray. Either way, opening Sound Connect again from your apps shows its panel.
 - **It keeps saying "Looking for your headphones".** Make sure they're on and connected to this computer in its Bluetooth settings. If they are, turn them off and on again.
 - **On a Mac, it never finds them.** Check that Sound Connect is allowed in System Settings › Privacy & Security › Bluetooth.
 - **On Linux, Bluetooth is off.** Turn it on with `sudo systemctl enable --now bluetooth`.

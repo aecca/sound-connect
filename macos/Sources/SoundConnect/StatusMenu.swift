@@ -12,6 +12,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     private let model: HeadsetModel
     private let updater: Updater
     private let calls: Calls
+    private let shortcut: ModeShortcut
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     private let menu = NSMenu()
 
@@ -27,6 +28,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     private var presetItems: [(EqPreset, NSMenuItem)] = []
     private var autoOffItem: NSMenuItem?
     private var autoOffItems: [(AutoOff, NSMenuItem)] = []
+    private var shortcutItem: NSMenuItem?
     private var openAtLoginItem: NSMenuItem?
 
     private enum Layout: Equatable {
@@ -34,10 +36,11 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         case message(String, connect: [String])
     }
 
-    init(model: HeadsetModel, updater: Updater, calls: Calls) {
+    init(model: HeadsetModel, updater: Updater, calls: Calls, shortcut: ModeShortcut) {
         self.model = model
         self.updater = updater
         self.calls = calls
+        self.shortcut = shortcut
         super.init()
         menu.delegate = self
         menu.autoenablesItems = false
@@ -168,6 +171,9 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         }
 
         menu.addItem(.separator())
+        shortcutItem = actionItem(ModeShortcut.title, #selector(toggleShortcut))
+        shortcutItem?.toolTip = "Press Control-Option-Command-N in any app to switch to the next mode."
+        menu.addItem(shortcutItem!)
         openAtLoginItem = actionItem("Open at Login", #selector(toggleOpenAtLogin))
         menu.addItem(openAtLoginItem!)
         menu.addItem(actionItem("Quit Sound Connect", #selector(quit), key: "q"))
@@ -213,6 +219,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
     private func update() {
         openAtLoginItem?.state = SMAppService.mainApp.status == .enabled ? .on : .off
+        shortcutItem?.state = shortcut.isOn ? .on : .off
         for (mode, item) in modeItems {
             item.state = model.mode == mode ? .on : .off
         }
@@ -311,6 +318,11 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
     @objc private func connectHeadset(_ item: NSMenuItem) {
         if let name = item.representedObject as? String { model.connect(name) }
+    }
+
+    @objc private func toggleShortcut() {
+        shortcut.isOn.toggle()
+        update()
     }
 
     @objc private func toggleOpenAtLogin() {

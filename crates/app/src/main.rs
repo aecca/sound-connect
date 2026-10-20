@@ -2,6 +2,7 @@
 
 mod assets;
 mod calls;
+mod control;
 mod headset;
 mod icon;
 mod microphone;
@@ -10,16 +11,25 @@ mod settings;
 mod tray;
 mod update;
 
+use std::process::ExitCode;
 use std::time::Duration;
 
 use gpui_kit::component::Theme;
 use gpui_kit::*;
 
-fn main() {
+fn main() -> ExitCode {
+    let args: Vec<String> = std::env::args().skip(1).collect();
     // Lets installers check the app starts, without opening any windows.
-    if std::env::args().any(|arg| arg == "--version") {
+    if args.iter().any(|arg| arg == "--version") {
         println!("Sound Connect {}", env!("CARGO_PKG_VERSION"));
-        return;
+        return ExitCode::SUCCESS;
+    }
+    if !args.is_empty() {
+        return control::run(&args);
+    }
+    // Already running: open its panel rather than starting another.
+    if control::show_running().is_ok() {
+        return ExitCode::SUCCESS;
     }
 
     gpui_kit::application().with_assets(assets::Assets).run(|cx| {
@@ -46,6 +56,7 @@ fn main() {
         cx.set_global(settings::Settings::load());
         tray::install(headset.clone(), cx);
         calls::start(headset.clone(), cx);
+        control::serve(headset.clone(), cx);
         update::start(cx);
 
         // Development aid: open the panel right away, e.g. to screenshot it.
@@ -57,4 +68,5 @@ fn main() {
             .detach();
         }
     });
+    ExitCode::SUCCESS
 }

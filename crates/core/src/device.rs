@@ -41,6 +41,14 @@ pub struct Device {
 }
 
 impl Device {
+    /// The listening mode after `current` in [`modes`](Self::modes), and the
+    /// first after the last: what a "next mode" shortcut switches to.
+    pub fn mode_after(&self, current: Option<ListeningMode>) -> Option<ListeningMode> {
+        let position = current.and_then(|current| self.modes.iter().position(|mode| mode.mode == current));
+        let next = position.map_or(0, |position| (position + 1) % self.modes.len());
+        self.modes.get(next).map(|mode| mode.mode)
+    }
+
     /// A headset that's been recognized but whose controls aren't known yet.
     pub fn unidentified(brand: Brand, model: impl Into<String>) -> Self {
         Self {
@@ -83,6 +91,26 @@ pub enum ListeningMode {
     /// Lets outside sound in (Sony's "Ambient Sound").
     Ambient,
     Off,
+}
+
+impl ListeningMode {
+    pub const ALL: [Self; 5] =
+        [Self::NoiseCancelling, Self::NoiseCancellingLow, Self::WindReduction, Self::Ambient, Self::Off];
+
+    /// A name that stays the same, for commands and scripts.
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::NoiseCancelling => "noise-cancelling",
+            Self::NoiseCancellingLow => "noise-cancelling-low",
+            Self::WindReduction => "wind-reduction",
+            Self::Ambient => "ambient",
+            Self::Off => "off",
+        }
+    }
+
+    pub fn from_id(id: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|mode| mode.id() == id)
+    }
 }
 
 /// A listening mode under the name the brand gives it, e.g. Bose's "High".
@@ -193,6 +221,28 @@ pub enum Setting {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn steps_through_the_modes_and_wraps_around() {
+        let mut device = Device::unidentified(Brand::Sony, "WH-1000XM5");
+        assert_eq!(device.mode_after(None), None);
+        device.modes = [ListeningMode::Off, ListeningMode::Ambient, ListeningMode::NoiseCancelling]
+            .map(|mode| Mode { mode, name: "" })
+            .to_vec();
+        assert_eq!(device.mode_after(Some(ListeningMode::Off)), Some(ListeningMode::Ambient));
+        assert_eq!(device.mode_after(Some(ListeningMode::NoiseCancelling)), Some(ListeningMode::Off));
+        // Not known yet, or not one of this headset's: start from the first.
+        assert_eq!(device.mode_after(None), Some(ListeningMode::Off));
+        assert_eq!(device.mode_after(Some(ListeningMode::WindReduction)), Some(ListeningMode::Off));
+    }
+
+    #[test]
+    fn names_modes_for_scripts() {
+        for mode in ListeningMode::ALL {
+            assert_eq!(ListeningMode::from_id(mode.id()), Some(mode));
+        }
+        assert_eq!(ListeningMode::from_id("Ambient"), None);
+    }
 
     #[test]
     fn names_auto_off_times() {
