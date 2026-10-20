@@ -244,7 +244,7 @@ impl Panel {
         toggle_row(
             "low-battery-alerts",
             "Low Battery Alerts",
-            Some("A notification at 20% and at 10%"),
+            Some("A notification at 20%, 10% and 5%"),
             cx.global::<Settings>().low_battery_alerts,
             false,
             p,

@@ -1,5 +1,5 @@
-//! When to say the battery is running low: once at 20%, once more at 10%,
-//! and not again until it's been charged. Apps pass each reading to
+//! When to say the battery is running low: once at 20%, again at 10% and at
+//! 5%, and not again until it's been charged. Apps pass each reading to
 //! [`LowBattery`] and show a notification when it says so.
 
 use crate::device::Battery;
@@ -12,7 +12,7 @@ pub struct LowBattery {
 
 impl LowBattery {
     /// Where to warn, highest first.
-    pub const LEVELS: [u8; 2] = [20, 10];
+    pub const LEVELS: [u8; 3] = [20, 10, 5];
     /// Above this the battery counts as charged, even if it charged while the
     /// app wasn't looking. It's well above the first warning, so a reading
     /// going back and forth by a point doesn't warn again.
@@ -42,10 +42,14 @@ mod tests {
     }
 
     #[test]
-    fn warns_at_twenty_and_ten_percent_only_once_each() {
+    fn warns_at_twenty_ten_and_five_percent_only_once_each() {
         let mut low = LowBattery::default();
-        let warnings: Vec<_> = [50, 30, 21, 20, 19, 21, 20, 12, 10, 9, 5].map(|level| low.update(at(level))).to_vec();
-        assert_eq!(warnings, [false, false, false, true, false, false, false, false, true, false, false]);
+        let warnings: Vec<_> =
+            [50, 30, 21, 20, 19, 21, 20, 12, 10, 9, 6, 5, 4, 6].map(|level| low.update(at(level))).to_vec();
+        assert_eq!(
+            warnings,
+            [false, false, false, true, false, false, false, false, true, false, false, true, false, false]
+        );
     }
 
     #[test]
@@ -54,6 +58,7 @@ mod tests {
         assert!(low.update(at(8)));
         assert!(!low.update(at(15)));
         assert!(!low.update(at(7)));
+        assert!(low.update(at(5)));
     }
 
     #[test]

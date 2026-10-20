@@ -4,7 +4,7 @@ import SoundConnectCore
 import UserNotifications
 
 /// "Low Battery Alerts": a notification when the headset's battery runs low,
-/// at 20% and again at 10%. The shared core decides when. macOS asks once
+/// at 20% and again at 10% and 5%. The shared core decides when. macOS asks once
 /// whether Sound Connect may show notifications, the first time it has one.
 @MainActor
 final class BatteryAlerts: NSObject, UNUserNotificationCenterDelegate {
