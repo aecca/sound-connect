@@ -68,6 +68,13 @@ If you change the mode with the button on your headphones, Sound Connect shows t
 
 On Linux, the equalizer, DSEE and one-click connect are coming soon.
 
+## Light and fast
+
+- **Small.** About 1 MB to download on a Mac, and about 15 MB on Linux.
+- **Native.** On a Mac, it's a real macOS menu, made with the same tools as the system's own. On Linux, it's a native app too. Neither one hides a web browser inside, as many apps do.
+- **Instant.** Your headphones change the moment you click. When you press a button on them, Sound Connect shows it right away.
+- **Out of the way.** It opens when you log in and waits quietly in the menu bar or system tray. No account, no ads, and it works without internet.
+
 ## Keyboard shortcut
 
 On a Mac, turn on **Switch Modes with ⌃⌥⌘N** in Sound Connect's menu. Then press Control-Option-Command-N in any app to go to the next mode.
