@@ -130,15 +130,54 @@ private struct BandSlider: View {
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
                 .opacity(showsValue ? 1 : 0)
-            Slider(value: $value, in: range, step: 1)
-                .rotationEffect(.degrees(-90))
-                .frame(width: 150, height: 24)
+            VerticalSlider(value: $value, range: range)
                 .frame(width: 32, height: 150)
+                .accessibilityLabel(label)
             Text(label)
                 .font(.caption)
                 .fixedSize()
         }
         .frame(width: 40)
+    }
+}
+
+/// A vertical slider, which SwiftUI doesn't have: AppKit's own, with a tick
+/// mark at each step it stops at.
+private struct VerticalSlider: NSViewRepresentable {
+    @Binding var value: Double
+    let range: ClosedRange<Double>
+
+    func makeNSView(context: Context) -> NSSlider {
+        let slider = NSSlider(
+            value: value, minValue: range.lowerBound, maxValue: range.upperBound, target: context.coordinator,
+            action: #selector(Coordinator.changed(_:)))
+        slider.isVertical = true
+        slider.numberOfTickMarks = Int(range.upperBound - range.lowerBound) + 1
+        slider.allowsTickMarkValuesOnly = true
+        slider.tickMarkPosition = .trailing
+        slider.isContinuous = true
+        return slider
+    }
+
+    func updateNSView(_ slider: NSSlider, context: Context) {
+        context.coordinator.value = $value
+        if slider.doubleValue != value { slider.doubleValue = value }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(value: $value)
+    }
+
+    final class Coordinator: NSObject {
+        var value: Binding<Double>
+
+        init(value: Binding<Double>) {
+            self.value = value
+        }
+
+        @objc func changed(_ slider: NSSlider) {
+            value.wrappedValue = slider.doubleValue.rounded()
+        }
     }
 }
 
