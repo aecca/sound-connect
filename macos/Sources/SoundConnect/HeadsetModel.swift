@@ -40,6 +40,8 @@ final class HeadsetModel {
     var equalizer: Equalizer?
     /// The devices the headset is connected to, when it says.
     var connectedDevices: [ConnectedDevice] = []
+    /// The devices the headset is paired with, when it says.
+    var pairedDevices: [PairedDevice] = []
     /// Supported headsets paired with this Mac but not connected right now.
     var disconnectedHeadsets: [String] = []
     /// A problem to show while not connected, e.g. a failed connection.
@@ -80,6 +82,7 @@ final class HeadsetModel {
         case .speakToChatEnd(let end): speakToChatEnd = end
         case .equalizer(let value): equalizer = value
         case .connectedDevices(let devices): connectedDevices = devices
+        case .pairedDevices(let devices): pairedDevices = devices
         }
     }
 
@@ -103,6 +106,7 @@ final class HeadsetModel {
         speakToChatEnd = nil
         equalizer = nil
         connectedDevices = []
+        pairedDevices = []
     }
 
     /// The headset's battery, or the emptier earbud's.
@@ -159,6 +163,14 @@ final class HeadsetModel {
             for index in connectedDevices.indices {
                 connectedDevices[index].playing = connectedDevices[index].id == id
             }
+        case .connectDevice(let id):
+            guard let index = pairedDevices.firstIndex(where: { $0.id == id && !$0.connected }) else { return }
+            pairedDevices[index].connected = true
+        case .disconnectDevice(let id):
+            // Not this Mac: the app talks to the headset through it.
+            guard let index = pairedDevices.firstIndex(where: { $0.id == id && $0.connected && !$0.thisDevice })
+            else { return }
+            pairedDevices[index].connected = false
         case .powerOff:
             break
         }

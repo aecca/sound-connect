@@ -18,7 +18,7 @@ pub mod registry;
 pub use calls::CallAmbience;
 pub use device::{
     Ambient, AutoOff, Battery, BatteryLayout, Brand, ConnectedDevice, Device, Feature, ListeningMode, Mode,
-    NoiseButton, Setting, SpeakToChatEnd, Update, VoiceSensitivity,
+    NoiseButton, PairedDevice, Setting, SpeakToChatEnd, Update, VoiceSensitivity,
 };
 pub use driver::{Driver, Frame, Output};
 pub use equalizer::{EqBands, EqLayout, EqPreset, Equalizer};

@@ -133,6 +133,19 @@ struct MenuView: View {
             }
         }
 
+        if !model.pairedDevices.isEmpty {
+            MenuDivider()
+            FoldingSection(title: "Devices", options: options) {
+                // Connected ones first, in the order the headset lists them.
+                let devices = model.pairedDevices.filter(\.connected) + model.pairedDevices.filter { !$0.connected }
+                ForEach(devices, id: \.id) { paired in
+                    DeviceRow(device: paired) {
+                        model.change(paired.connected ? .disconnectDevice(id: paired.id) : .connectDevice(id: paired.id))
+                    }
+                }
+            }
+        }
+
         if hasHeadphoneSettings(device) {
             MenuDivider()
             FoldingSection(title: "Headphone Settings", options: options) {
@@ -366,6 +379,41 @@ private struct ToggleRow: View {
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(isOn ? .isSelected : [])
+    }
+}
+
+/// A device the headphones are paired with, blue while connected. Clicking
+/// connects or disconnects it, except this Mac: the panel talks to the
+/// headphones through it.
+private struct DeviceRow: View {
+    let device: PairedDevice
+    let action: () -> Void
+
+    var body: some View {
+        if device.thisDevice {
+            content
+        } else {
+            Button(action: action) {
+                content.modifier(HoverHighlight())
+            }
+            .buttonStyle(.plain)
+            .help(device.connected ? "Disconnect" : "Connect")
+            .accessibilityAddTraits(device.connected ? .isSelected : [])
+        }
+    }
+
+    private var content: some View {
+        HStack(spacing: Row.spacing) {
+            RowSymbol(name: device.thisDevice ? "laptopcomputer" : "dot.radiowaves.left.and.right", isOn: device.connected)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(device.name)
+                if device.thisDevice {
+                    Text("This Mac").font(.system(size: 11)).foregroundStyle(.secondary)
+                }
+            }
+            Spacer(minLength: 8)
+        }
+        .rowLayout()
     }
 }
 

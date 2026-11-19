@@ -6,11 +6,13 @@
 
 mod packet;
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use packet::{Function, Operator, Packet, PacketReader};
 
-use crate::device::{AutoOff, Battery, BatteryLayout, Brand, Device, Feature, ListeningMode, Mode, Setting, Update};
+use crate::device::{
+    AutoOff, Battery, BatteryLayout, Brand, Device, Feature, ListeningMode, Mode, PairedDevice, Setting, Update,
+};
 use crate::driver::{Driver, Frame, Output};
 use crate::queue::StopAndWait;
 
@@ -50,6 +52,14 @@ const ACTION_NOISE_CANCELLING: u8 = 0x02;
 /// Only the QuietComfort 35 II has the Action button.
 const HAS_ACTION_BUTTON: u16 = 0x4020;
 
+/// A paired device's state, as bits: connected, and the device asking, which
+/// is this computer.
+const DEVICE_CONNECTED: u8 = 0x01;
+const DEVICE_THIS: u8 = 0x02;
+/// Connecting or disconnecting a device takes a few seconds; the list is
+/// read again after that.
+const READ_DEVICES_AFTER: Duration = Duration::from_secs(4);
+
 pub struct BoseDriver {
     device: Device,
     reader: PacketReader,
@@ -57,6 +67,13 @@ pub struct BoseDriver {
     /// Voice prompts share a byte with their language, which must be sent
     /// back unchanged when turning them on or off.
     language: Option<u8>,
+    /// The paired devices' addresses, as the headset lists them.
+    listed: Vec<[u8; 6]>,
+    /// The listed devices whose details have come in, in the same order.
+    paired: Vec<PairedDevice>,
+    /// When to read the paired devices again, after connecting or
+    /// disconnecting one.
+    read_devices_at: Option<Instant>,
 }
 
 impl BoseDriver {
@@ -66,6 +83,9 @@ impl BoseDriver {
             reader: PacketReader::default(),
             requests: StopAndWait::default(),
             language: None,
+            listed: Vec::new(),
+            paired: Vec::new(),
+            read_devices_at: None,
         }
     }
 
@@ -107,11 +127,60 @@ impl BoseDriver {
             equalizer: None,
             power_off: false,
         };
+        // These go out after the other start-up reads.
         if self.device.features.contains(&Feature::ActionButtonNoiseCancelling) {
-            // Goes out after the other start-up reads.
             self.requests.push(Packet::get(Function::BUTTONS), |_| false);
         }
+        self.read_devices();
         Update::Device(self.device.clone())
+    }
+
+    /// Whether the headset has been recognized as a model this driver knows.
+    fn identified(&self) -> bool {
+        !self.device.modes.is_empty()
+    }
+
+    fn read_devices(&mut self) {
+        self.requests.push(Packet::get(Function::PAIRED_DEVICES), |queued| queued.function == Function::PAIRED_DEVICES);
+    }
+
+    /// Asks about each listed device, and forgets the ones no longer listed.
+    fn list_devices(&mut self, payload: &[u8]) -> Update {
+        let (addresses, _) = payload.get(1..).unwrap_or_default().as_chunks::<6>();
+        self.listed = addresses.to_vec();
+        self.paired.retain(|device| addresses.iter().any(|address| device.id == address_text(address)));
+        for address in addresses {
+            self.requests.push(Packet::get_about(Function::DEVICE_INFO, address.to_vec()), |_| false);
+        }
+        Update::PairedDevices(self.paired.clone())
+    }
+
+    /// Fills in a listed device's details, keeping the headset's order.
+    fn describe_device(&mut self, payload: &[u8]) -> Option<Update> {
+        let (address, rest) = payload.split_first_chunk::<6>()?;
+        let (&state, rest) = rest.split_first()?;
+        let position = self.listed.iter().position(|listed| listed == address)?;
+        let id = address_text(address);
+        let name = String::from_utf8_lossy(rest.get(2..).unwrap_or_default()).trim_end_matches('\0').to_owned();
+        let device = PairedDevice {
+            name: if name.is_empty() { id.clone() } else { name },
+            id,
+            connected: state & DEVICE_CONNECTED != 0,
+            this_device: state & DEVICE_THIS != 0,
+        };
+        self.paired.retain(|known| known.id != device.id);
+        let index = self.paired.iter().take_while(|known| self.position(known) < position).count();
+        self.paired.insert(index, device);
+        Some(Update::PairedDevices(self.paired.clone()))
+    }
+
+    fn position(&self, device: &PairedDevice) -> usize {
+        self.listed.iter().position(|address| device.id == address_text(address)).unwrap_or(usize::MAX)
+    }
+
+    /// The address of a paired device, if it's one the headset listed.
+    fn paired_address(&self, id: &str) -> Option<[u8; 6]> {
+        self.listed.iter().find(|address| address_text(address) == id).copied()
     }
 
     fn update(&mut self, packet: &Packet) -> Option<Update> {
@@ -139,6 +208,8 @@ impl BoseDriver {
                 let minutes = *payload.first()?;
                 Some(Update::AutoOff(if minutes == 0 { AutoOff::Never } else { AutoOff::Minutes(minutes.into()) }))
             }
+            Function::PAIRED_DEVICES => Some(self.list_devices(payload)),
+            Function::DEVICE_INFO => self.describe_device(payload),
             Function::BUTTONS => match payload[..] {
                 [button, press, action, ..] if [button, press] == ACTION_BUTTON => match action {
                     ACTION_NOISE_CANCELLING => Some(Update::Feature(Feature::ActionButtonNoiseCancelling, true)),
@@ -216,17 +287,44 @@ impl Driver for BoseDriver {
                 };
                 self.request(Packet::set_get(Function::AUTO_OFF, vec![minutes]), now)
             }
+            Setting::ConnectDevice(id) if self.paired.iter().any(|device| device.id == id && !device.connected) => {
+                let Some(address) = self.paired_address(&id) else { return Vec::new() };
+                self.read_devices_at = Some(now + READ_DEVICES_AFTER);
+                self.request(Packet::start(Function::CONNECT, [&[0x00][..], &address].concat()), now)
+            }
+            // Not this computer: Sound Connect talks to the headset over that connection.
+            Setting::DisconnectDevice(id)
+                if self.paired.iter().any(|device| device.id == id && device.connected && !device.this_device) =>
+            {
+                let Some(address) = self.paired_address(&id) else { return Vec::new() };
+                self.read_devices_at = Some(now + READ_DEVICES_AFTER);
+                self.request(Packet::start(Function::DISCONNECT, address.to_vec()), now)
+            }
             _ => Vec::new(),
         }
     }
 
+    /// The battery, and the paired devices, which connect and disconnect on
+    /// their own.
     fn refresh(&mut self, now: Instant) -> Vec<Frame> {
+        if self.identified() {
+            self.read_devices();
+        }
         self.request(Packet::get(Function::BATTERY), now)
     }
 
     fn tick(&mut self, now: Instant) -> Vec<Frame> {
+        if self.read_devices_at.is_some_and(|at| now >= at) {
+            self.read_devices_at = None;
+            self.read_devices();
+        }
         self.requests.tick(now).map(|packet| packet.encode()).into_iter().collect()
     }
+}
+
+/// An address as people write it, the way the headset sends it: "AA:BB:CC:DD:EE:FF".
+fn address_text(address: &[u8; 6]) -> String {
+    address.iter().map(|byte| format!("{byte:02X}")).collect::<Vec<_>>().join(":")
 }
 
 #[cfg(test)]
@@ -307,11 +405,115 @@ mod tests {
         // A QuietComfort 35's answer, as bosectl recorded it: the voice assistant.
         let output = driver.receive(&status(Function::BUTTONS, &[0x10, 0x04, 0x01, 0x07]), now);
         assert_eq!(output.updates, [Update::Feature(Feature::ActionButtonNoiseCancelling, false)]);
+        // Then the paired devices: none.
+        driver.receive(&status(Function::PAIRED_DEVICES, &[0x00]), now);
 
         assert_eq!(
             driver.set(Setting::Feature(Feature::ActionButtonNoiseCancelling, true), now),
             [vec![0x01, 0x09, 0x02, 0x03, 0x10, 0x04, 0x02]]
         );
+    }
+
+    const LAPTOP: [u8; 6] = [0x11, 0x22, 0x33, 0x44, 0x55, 0x66];
+    const PHONE: [u8; 6] = [0xa1, 0xb2, 0xc3, 0xd4, 0xe5, 0xf6];
+
+    /// A QuietComfort 35 II that has answered its start-up reads, and has
+    /// just asked for its paired devices.
+    fn listing(now: Instant) -> BoseDriver {
+        let mut driver = identified(now);
+        for (function, payload) in [
+            (Function::FIRMWARE, &b"4.8.1"[..]),
+            (Function::BATTERY, &[80]),
+            (Function::NOISE_CANCELLING, &[1, 0x0b]),
+            (Function::VOICE_PROMPTS, &[0x21]),
+            (Function::AUTO_OFF, &[20]),
+        ] {
+            driver.receive(&status(function, payload), now);
+        }
+        let output = driver.receive(&status(Function::BUTTONS, &[0x10, 0x04, 0x01, 0x07]), now);
+        assert_eq!(output.writes, [vec![0x04, 0x04, 0x01, 0x00]]);
+        driver
+    }
+
+    /// A paired device's details as based-connect reads them: its address,
+    /// its state, two unknown bytes, then its name.
+    fn info(address: [u8; 6], state: u8, name: &str) -> Vec<u8> {
+        status(Function::DEVICE_INFO, &[&address[..], &[state, 0x00, 0x00], name.as_bytes()].concat())
+    }
+
+    fn paired(id: &str, name: &str, connected: bool, this_device: bool) -> PairedDevice {
+        PairedDevice { id: id.into(), name: name.into(), connected, this_device }
+    }
+
+    /// The headset lists a laptop, the one asking, and a phone it isn't
+    /// connected to.
+    fn with_a_laptop_and_a_phone(now: Instant) -> BoseDriver {
+        let mut driver = listing(now);
+        driver.receive(&status(Function::PAIRED_DEVICES, &[&[0x01][..], &LAPTOP, &PHONE].concat()), now);
+        driver.receive(&info(LAPTOP, 0x03, "MacBook Air"), now);
+        driver.receive(&info(PHONE, 0x00, "iPhone"), now);
+        driver
+    }
+
+    #[test]
+    fn lists_the_paired_devices_with_their_names() {
+        let now = Instant::now();
+        let mut driver = listing(now);
+        let output = driver.receive(&status(Function::PAIRED_DEVICES, &[&[0x03][..], &LAPTOP, &PHONE].concat()), now);
+        assert_eq!(output.writes, [vec![0x04, 0x05, 0x01, 0x06, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66]]);
+
+        let output = driver.receive(&info(LAPTOP, 0x03, "MacBook Air"), now);
+        assert_eq!(output.writes, [vec![0x04, 0x05, 0x01, 0x06, 0xa1, 0xb2, 0xc3, 0xd4, 0xe5, 0xf6]]);
+        let laptop = paired("11:22:33:44:55:66", "MacBook Air", true, true);
+        assert_eq!(output.updates, [Update::PairedDevices(vec![laptop.clone()])]);
+
+        let output = driver.receive(&info(PHONE, 0x01, "iPhone"), now);
+        let phone = paired("A1:B2:C3:D4:E5:F6", "iPhone", true, false);
+        assert_eq!(output.updates, [Update::PairedDevices(vec![laptop, phone])]);
+    }
+
+    #[test]
+    fn forgets_devices_no_longer_listed() {
+        let now = Instant::now();
+        let mut driver = with_a_laptop_and_a_phone(now);
+        let output = driver.receive(&status(Function::PAIRED_DEVICES, &[&[0x01][..], &LAPTOP].concat()), now);
+        let laptop = paired("11:22:33:44:55:66", "MacBook Air", true, true);
+        assert_eq!(output.updates, [Update::PairedDevices(vec![laptop])]);
+    }
+
+    #[test]
+    fn connects_a_paired_device_and_reads_the_list_again_later() {
+        let now = Instant::now();
+        let mut driver = with_a_laptop_and_a_phone(now);
+        assert_eq!(
+            driver.set(Setting::ConnectDevice("A1:B2:C3:D4:E5:F6".into()), now),
+            [vec![0x04, 0x01, 0x05, 0x07, 0x00, 0xa1, 0xb2, 0xc3, 0xd4, 0xe5, 0xf6]]
+        );
+        // Under way: that answers it, and nothing is sent again meanwhile.
+        driver.receive(&[&[0x04, 0x01, 0x07, 0x06][..], &PHONE].concat(), now);
+        assert!(driver.tick(now + Duration::from_secs(2)).is_empty());
+        assert_eq!(driver.tick(now + READ_DEVICES_AFTER), [vec![0x04, 0x04, 0x01, 0x00]]);
+    }
+
+    #[test]
+    fn disconnects_other_devices_but_not_this_one() {
+        let now = Instant::now();
+        let mut driver = with_a_laptop_and_a_phone(now);
+        driver.receive(&info(PHONE, 0x01, "iPhone"), now);
+        assert!(driver.set(Setting::DisconnectDevice("11:22:33:44:55:66".into()), now).is_empty());
+        assert_eq!(
+            driver.set(Setting::DisconnectDevice("A1:B2:C3:D4:E5:F6".into()), now),
+            [vec![0x04, 0x02, 0x05, 0x06, 0xa1, 0xb2, 0xc3, 0xd4, 0xe5, 0xf6]]
+        );
+    }
+
+    #[test]
+    fn ignores_devices_it_does_not_know_or_already_connected() {
+        let now = Instant::now();
+        let mut driver = with_a_laptop_and_a_phone(now);
+        assert!(driver.set(Setting::ConnectDevice("00:00:00:00:00:01".into()), now).is_empty());
+        assert!(driver.set(Setting::ConnectDevice("11:22:33:44:55:66".into()), now).is_empty());
+        assert!(driver.set(Setting::DisconnectDevice("A1:B2:C3:D4:E5:F6".into()), now).is_empty());
     }
 
     #[test]
@@ -355,6 +557,7 @@ mod tests {
         driver.receive(&status(Function::VOICE_PROMPTS, &[0x21]), now);
         driver.receive(&status(Function::AUTO_OFF, &[20]), now);
         driver.receive(&status(Function::BUTTONS, &[0x10, 0x04, 0x01, 0x07]), now);
+        driver.receive(&status(Function::PAIRED_DEVICES, &[0x00]), now);
 
         assert_eq!(
             driver.set(Setting::Mode(ListeningMode::NoiseCancelling), now),

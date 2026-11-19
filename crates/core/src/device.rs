@@ -278,6 +278,18 @@ pub struct ConnectedDevice {
     pub playing: bool,
 }
 
+/// A device the headset is paired with, from the list it keeps.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct PairedDevice {
+    /// Its Bluetooth address, "AA:BB:CC:DD:EE:FF", for
+    /// [`Setting::ConnectDevice`] and [`Setting::DisconnectDevice`].
+    pub id: String,
+    pub name: String,
+    pub connected: bool,
+    /// The device this app runs on: it can't disconnect itself from here.
+    pub this_device: bool,
+}
+
 /// Something the headset reported.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Update {
@@ -306,6 +318,8 @@ pub enum Update {
     Equalizer(Equalizer),
     /// The devices it's connected to, when it says.
     ConnectedDevices(Vec<ConnectedDevice>),
+    /// Every device it's paired with, when it says.
+    PairedDevices(Vec<PairedDevice>),
 }
 
 /// Something the user changed.
@@ -324,6 +338,12 @@ pub enum Setting {
     /// Play the audio of this connected device, by its
     /// [`id`](ConnectedDevice::id).
     PlayFrom(String),
+    /// Connect the headset to this paired device, by its
+    /// [`id`](PairedDevice::id).
+    ConnectDevice(String),
+    /// Disconnect the headset from this paired device, by its
+    /// [`id`](PairedDevice::id).
+    DisconnectDevice(String),
     /// Turn the headset off, on every device it's connected to.
     PowerOff,
 }

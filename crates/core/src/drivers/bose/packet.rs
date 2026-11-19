@@ -5,8 +5,8 @@
 //! ```
 //!
 //! The low four bits of `flags` are the operator. Layouts follow based-connect
-//! and bosectl (MIT), which checked them against a QuietComfort 35 on
-//! firmware 4.8.1.
+//! (GPL-3.0; only its protocol facts are used here) and bosectl (MIT), which
+//! checked them against a QuietComfort 35 on firmware 4.8.1.
 
 /// A function of the headset: a block and a function within it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -33,6 +33,16 @@ impl Function {
     pub const BUTTONS: Self = Self { block: 1, id: 9 };
     /// Battery level, in percent.
     pub const BATTERY: Self = Self { block: 2, id: 2 };
+    /// Connects a paired device: a zero byte, then its address.
+    pub const CONNECT: Self = Self { block: 4, id: 1 };
+    /// Disconnects a device, by its address.
+    pub const DISCONNECT: Self = Self { block: 4, id: 2 };
+    /// The paired devices: a byte about which are connected, then six address
+    /// bytes each, most recent first.
+    pub const PAIRED_DEVICES: Self = Self { block: 4, id: 4 };
+    /// A paired device, asked for by its address: the address again, its
+    /// state, two bytes nobody has worked out, then its name.
+    pub const DEVICE_INFO: Self = Self { block: 4, id: 5 };
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -44,6 +54,8 @@ pub(super) enum Operator {
     /// The headset's answer to a get, or a change it reports by itself.
     Status,
     Error,
+    /// Starts an action, like connecting a device.
+    Start,
     /// An action finished.
     Result,
     /// An action is under way; its result comes later.
@@ -57,6 +69,7 @@ impl Operator {
             Self::SetGet => 2,
             Self::Status => 3,
             Self::Error => 4,
+            Self::Start => 5,
             Self::Result => 6,
             Self::Processing => 7,
         }
@@ -68,15 +81,17 @@ impl Operator {
             2 => Some(Self::SetGet),
             3 => Some(Self::Status),
             4 => Some(Self::Error),
+            5 => Some(Self::Start),
             6 => Some(Self::Result),
             7 => Some(Self::Processing),
             _ => None,
         }
     }
 
-    /// Whether this answers a request, so the next one can go out.
+    /// Whether this answers a request, so the next one can go out. An action
+    /// is answered once it's under way: its result can take seconds.
     pub fn is_answer(self) -> bool {
-        matches!(self, Self::Status | Self::Error | Self::Result)
+        matches!(self, Self::Status | Self::Error | Self::Result | Self::Processing)
     }
 }
 
@@ -92,11 +107,20 @@ impl Packet {
         Self { function, operator: Operator::Get, payload: Vec::new() }
     }
 
+    /// A get about one thing, like a device by its address.
+    pub fn get_about(function: Function, payload: Vec<u8>) -> Self {
+        Self { function, operator: Operator::Get, payload }
+    }
+
     pub fn set_get(function: Function, payload: Vec<u8>) -> Self {
         Self { function, operator: Operator::SetGet, payload }
     }
 
-    /// Payloads are at most 255 bytes; the ones this driver sends are one.
+    pub fn start(function: Function, payload: Vec<u8>) -> Self {
+        Self { function, operator: Operator::Start, payload }
+    }
+
+    /// Payloads are at most 255 bytes; the ones this driver sends are seven at most.
     pub fn encode(&self) -> Vec<u8> {
         let length = u8::try_from(self.payload.len()).expect("BMAP payloads fit in 255 bytes");
         let mut bytes = vec![self.function.block, self.function.id, self.operator.code(), length];
@@ -141,6 +165,26 @@ mod tests {
         assert_eq!(Packet::get(Function::INIT).encode(), [0x00, 0x01, 0x01, 0x00]);
         assert_eq!(Packet::get(Function::BATTERY).encode(), [0x02, 0x02, 0x01, 0x00]);
         assert_eq!(Packet::set_get(Function::NOISE_CANCELLING, vec![3]).encode(), [0x01, 0x06, 0x02, 0x01, 0x03]);
+    }
+
+    /// The bytes based-connect sends to list, read, connect and disconnect
+    /// paired devices.
+    #[test]
+    fn encodes_device_requests() {
+        let address = [0x11, 0x22, 0x33, 0x44, 0x55, 0x66];
+        assert_eq!(Packet::get(Function::PAIRED_DEVICES).encode(), [0x04, 0x04, 0x01, 0x00]);
+        assert_eq!(
+            Packet::get_about(Function::DEVICE_INFO, address.to_vec()).encode(),
+            [0x04, 0x05, 0x01, 0x06, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66]
+        );
+        assert_eq!(
+            Packet::start(Function::CONNECT, [&[0x00][..], &address].concat()).encode(),
+            [0x04, 0x01, 0x05, 0x07, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66]
+        );
+        assert_eq!(
+            Packet::start(Function::DISCONNECT, address.to_vec()).encode(),
+            [0x04, 0x02, 0x05, 0x06, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66]
+        );
     }
 
     #[test]
