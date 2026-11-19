@@ -370,6 +370,36 @@ impl Panel {
         Some(row.text_color(p.label))
     }
 
+    /// The devices the headset is paired with, connected ones first, each with
+    /// a switch that connects or disconnects it. This computer's is shown but
+    /// can't be turned off: the panel talks to the headset through it.
+    fn devices(&self, p: Palette, cx: &App) -> Option<impl IntoElement> {
+        let mut devices = self.headset.read(cx).paired_devices.clone();
+        if devices.is_empty() {
+            return None;
+        }
+        devices.sort_by_key(|device| !device.connected);
+        let rows = devices.into_iter().enumerate().map(|(index, device)| {
+            let headset = self.headset.clone();
+            let caption = device.this_device.then_some("This computer");
+            let id = device.id;
+            toggle_row(
+                ("paired-device", index),
+                device.name,
+                caption,
+                device.connected,
+                device.this_device,
+                p,
+                move |on, cx| {
+                    let setting =
+                        if on { Setting::ConnectDevice(id.clone()) } else { Setting::DisconnectDevice(id.clone()) };
+                    headset.update(cx, |headset, cx| headset.change(setting, cx));
+                },
+            )
+        });
+        Some(v_flex().child(div().px_2().pt_1().child("Devices")).children(rows).text_color(p.label))
+    }
+
     /// What the headset's noise control button switches between, once the
     /// headset has said.
     fn noise_button(&self, device: &Device, p: Palette, cx: &App) -> Option<impl IntoElement> {
@@ -441,6 +471,7 @@ impl Panel {
             .when_some(self.auto_off(device, p, cx), |this, auto_off| this.child(separator(p)).child(auto_off))
             .when_some(self.noise_button(device, p, cx), |this, button| this.child(separator(p)).child(button))
             .when_some(self.play_from(p, cx), |this, play_from| this.child(separator(p)).child(play_from))
+            .when_some(self.devices(p, cx), |this, devices| this.child(separator(p)).child(devices))
             .child(separator(p))
             .child(Self::low_battery_alerts(p, cx))
             .into_any_element()
@@ -626,8 +657,8 @@ fn battery_indicator(battery: Battery, p: Palette) -> impl IntoElement {
 }
 
 fn toggle_row(
-    id: &'static str,
-    label: &'static str,
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
     caption: Option<&'static str>,
     on: bool,
     disabled: bool,
@@ -644,7 +675,7 @@ fn toggle_row(
             v_flex()
                 .flex_1()
                 .min_w_0()
-                .child(label)
+                .child(label.into())
                 .children(caption.map(|caption| div().text_size(px(11.)).text_color(p.secondary).child(caption))),
         )
         .child(

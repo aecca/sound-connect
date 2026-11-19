@@ -8,8 +8,8 @@ use std::sync::mpsc;
 use gpui_kit::*;
 use sc_bluetooth::{Event, PairedHeadset, Request};
 use sc_core::{
-    AutoOff, Battery, ConnectedDevice, Device, EqPreset, Equalizer, Feature, ListeningMode, NoiseButton, Setting,
-    SpeakToChatEnd, Update, VoiceSensitivity,
+    AutoOff, Battery, ConnectedDevice, Device, EqPreset, Equalizer, Feature, ListeningMode, NoiseButton, PairedDevice,
+    Setting, SpeakToChatEnd, Update, VoiceSensitivity,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -42,6 +42,8 @@ pub struct Headset {
     pub equalizer: Option<Equalizer>,
     /// The devices the headset is connected to, when it says.
     pub connected_devices: Vec<ConnectedDevice>,
+    /// The devices the headset is paired with, when it says.
+    pub paired_devices: Vec<PairedDevice>,
     /// Supported headsets paired with this computer but not connected.
     pub paired: Vec<PairedHeadset>,
     /// The paired headset the user asked to connect, while that's under way.
@@ -72,6 +74,7 @@ impl Headset {
             speak_to_chat_end: None,
             equalizer: None,
             connected_devices: Vec::new(),
+            paired_devices: Vec::new(),
             paired: Vec::new(),
             connecting: None,
             notice: None,
@@ -127,6 +130,7 @@ impl Headset {
             Update::SpeakToChatEnd(end) => self.speak_to_chat_end = Some(end),
             Update::Equalizer(equalizer) => self.equalizer = Some(equalizer),
             Update::ConnectedDevices(devices) => self.connected_devices = devices,
+            Update::PairedDevices(devices) => self.paired_devices = devices,
             // Not shown on Linux.
             Update::Firmware(_) => {}
         }
@@ -173,6 +177,8 @@ impl Headset {
                 }
                 changed
             }
+            Setting::ConnectDevice(id) => mark_connected(&mut self.paired_devices, id, true),
+            Setting::DisconnectDevice(id) => mark_connected(&mut self.paired_devices, id, false),
             Setting::PowerOff => true,
         };
         if changed {
@@ -187,5 +193,19 @@ impl Headset {
         self.connecting = Some(headset.name.clone());
         let _ = self.requests.send(Request::Connect(headset.address.clone()));
         cx.notify();
+    }
+}
+
+/// Shows a paired device as connected or not right away, before the headset
+/// confirms it; whether that's a change. This computer can't disconnect
+/// itself.
+fn mark_connected(devices: &mut [PairedDevice], id: &str, connected: bool) -> bool {
+    let device = devices.iter_mut().find(|device| device.id == id && device.connected != connected);
+    match device {
+        Some(device) if connected || !device.this_device => {
+            device.connected = connected;
+            true
+        }
+        _ => false,
     }
 }

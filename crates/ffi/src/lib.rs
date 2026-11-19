@@ -11,7 +11,7 @@ use std::time::Instant;
 
 use sc_core::{
     Battery, BatteryLayout, Brand, ConnectedDevice, Driver, EqLayout, Feature, ListeningMode, NoiseButton,
-    SpeakToChatEnd, VoiceSensitivity,
+    PairedDevice, SpeakToChatEnd, VoiceSensitivity,
 };
 
 uniffi::setup_scaffolding!();
@@ -88,6 +88,14 @@ pub struct ConnectedDevice {
     id: String,
     name: String,
     playing: bool,
+}
+
+#[uniffi::remote(Record)]
+pub struct PairedDevice {
+    id: String,
+    name: String,
+    connected: bool,
+    this_device: bool,
 }
 
 // Types that need a shape Swift can take: ranges, static strings, fixed-size
@@ -183,6 +191,7 @@ pub enum Update {
     SpeakToChatEnd { end: SpeakToChatEnd },
     Equalizer { equalizer: Equalizer },
     ConnectedDevices { devices: Vec<ConnectedDevice> },
+    PairedDevices { devices: Vec<PairedDevice> },
 }
 
 /// Something the user changed. See `sc_core::Setting`.
@@ -199,6 +208,8 @@ pub enum Setting {
     EqualizerPreset { preset: EqPreset },
     EqualizerBands { bands: EqBands },
     PlayFrom { id: String },
+    ConnectDevice { id: String },
+    DisconnectDevice { id: String },
     PowerOff,
 }
 
@@ -510,6 +521,7 @@ impl From<sc_core::Update> for Update {
             U::SpeakToChatEnd(end) => Self::SpeakToChatEnd { end },
             U::Equalizer(equalizer) => Self::Equalizer { equalizer: equalizer.into() },
             U::ConnectedDevices(devices) => Self::ConnectedDevices { devices },
+            U::PairedDevices(devices) => Self::PairedDevices { devices },
         }
     }
 }
@@ -528,6 +540,8 @@ impl From<Setting> for sc_core::Setting {
             Setting::EqualizerPreset { preset } => Self::EqualizerPreset(preset.into()),
             Setting::EqualizerBands { bands } => Self::EqualizerBands(bands.into()),
             Setting::PlayFrom { id } => Self::PlayFrom(id),
+            Setting::ConnectDevice { id } => Self::ConnectDevice(id),
+            Setting::DisconnectDevice { id } => Self::DisconnectDevice(id),
             Setting::PowerOff => Self::PowerOff,
         }
     }

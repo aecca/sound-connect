@@ -23,7 +23,7 @@
 - **Battery at a glance**: See each earbud and the case, get a notification when it runs low, and on a Mac, see it next to the menu bar icon
 - **Smart settings**: Speak-to-Chat and how readily it notices you, voice prompts, pausing music when you take your headphones off, and when they turn off on their own. On a Mac, you can also turn them off from the menu
 - **Buttons your way**: Choose what the noise control button switches between, or have the Bose Action button change noise cancelling
-- **Switch devices**: When your Sony headphones are connected to your phone and your computer at once, choose which one you hear
+- **Switch devices**: When your Sony headphones are connected to your phone and your computer at once, choose which one you hear. On a Bose QuietComfort 35, see every device it's paired with and connect or disconnect each one
 - **One-click connect**: Connect your headphones when they're paired but not connected
 - **See every change**: On a Mac, a pop-up shows the new mode when you change it with the button on your headphones or a shortcut
 - **Shortcuts and scripts**: Switch modes with a keyboard shortcut in any app, from Shortcuts, Raycast or Alfred, or show your headphones in Waybar
