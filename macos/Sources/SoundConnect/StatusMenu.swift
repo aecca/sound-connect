@@ -83,8 +83,7 @@ final class StatusMenu: NSObject {
         options.opensAtLogin = SMAppService.mainApp.status == .enabled
         let size = panel.contentSize
         let topLeft = point ?? anchor(width: size.width)
-        panel.setFrame(
-            NSRect(x: topLeft.x, y: topLeft.y - size.height, width: size.width, height: size.height), display: true)
+        panel.place(NSRect(x: topLeft.x, y: topLeft.y - size.height, width: size.width, height: size.height))
         panel.makeKeyAndOrderFront(nil)
         statusItem.button?.highlight(true)
         popUp.menuIsOpen = true
@@ -116,8 +115,7 @@ final class StatusMenu: NSObject {
     private func resize(to size: CGSize) {
         guard panel.isVisible else { return }
         let frame = panel.frame
-        panel.setFrame(
-            NSRect(x: frame.minX, y: frame.maxY - size.height, width: size.width, height: size.height), display: true)
+        panel.place(NSRect(x: frame.minX, y: frame.maxY - size.height, width: size.width, height: size.height))
     }
 
     /// Asks first: the headphones stop playing everywhere, and only their
@@ -148,12 +146,14 @@ final class StatusMenu: NSObject {
 
     /// The menu bar icon: over-ear headphones, distinct from the system's own
     /// headphones symbol, dimmed while no headset is connected, and the
-    /// battery level next to it when the user wants that.
+    /// battery level next to it when the user wants that. At 13 points the
+    /// symbol is 16 tall, the size menu bar icons should be: a larger one gets
+    /// cut off beside the battery level on menu bars without a camera notch.
     private func updateIcon() {
         let mode = model.device?.modes.first { $0.mode == model.mode }
         let description = mode.map { "Sound Connect: \($0.name)" } ?? "Sound Connect: not connected"
         let image = NSImage(systemSymbolName: "beats.headphones", accessibilityDescription: description)?
-            .withSymbolConfiguration(.init(pointSize: 15, weight: .regular))
+            .withSymbolConfiguration(.init(pointSize: 13, weight: .regular))
         image?.isTemplate = true
         guard let button = statusItem.button else { return }
         button.image = image
@@ -170,6 +170,7 @@ final class StatusMenu: NSObject {
 /// A borderless panel with the menu's material and rounded corners, at the
 /// level of menus, that can take keystrokes without activating the app.
 private final class MenuPanel: NSPanel {
+    private static let cornerRadius: CGFloat = 12
     private var host: NSView?
 
     init() {
@@ -185,6 +186,12 @@ private final class MenuPanel: NSPanel {
 
     override var canBecomeKey: Bool { true }
 
+    /// Moves and sizes the panel, and redraws its shadow to the new shape.
+    func place(_ frame: NSRect) {
+        setFrame(frame, display: true)
+        invalidateShadow()
+    }
+
     /// The size the content wants, laid out first so it's known before the
     /// panel has ever been shown.
     var contentSize: CGSize {
@@ -197,8 +204,11 @@ private final class MenuPanel: NSPanel {
         let background = NSVisualEffectView()
         background.material = .menu
         background.state = .active
+        // The material needs a mask to round its corners: on macOS 15 it
+        // ignores the layer's corner radius, which only clips the content.
+        background.maskImage = Self.roundedMask(radius: Self.cornerRadius)
         background.wantsLayer = true
-        background.layer?.cornerRadius = 12
+        background.layer?.cornerRadius = Self.cornerRadius
         background.layer?.masksToBounds = true
 
         let host = NSHostingView(rootView: view.background(SizeReader(onChange: onResize)))
@@ -208,6 +218,19 @@ private final class MenuPanel: NSPanel {
         background.addSubview(host)
         contentView = background
         self.host = host
+    }
+
+    /// A rounded rectangle that stretches to any size, keeping its corners.
+    private static func roundedMask(radius: CGFloat) -> NSImage {
+        let side = radius * 2 + 1
+        let image = NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
+            NSColor.black.setFill()
+            NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).fill()
+            return true
+        }
+        image.capInsets = NSEdgeInsets(top: radius, left: radius, bottom: radius, right: radius)
+        image.resizingMode = .stretch
+        return image
     }
 }
 
